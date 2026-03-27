@@ -76,6 +76,7 @@ from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig  # no
 from lerobot.cameras.reachy2_camera.configuration_reachy2_camera import Reachy2CameraConfig  # noqa: F401
 from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig  # noqa: F401
 from lerobot.cameras.zmq.configuration_zmq import ZMQCameraConfig  # noqa: F401
+from lerobot.cameras.isaac.configuration_isaac import IsaacCameraConfig  # noqa: F401
 from lerobot.configs import parser
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.datasets.image_writer import safe_stop_image_writer
@@ -107,6 +108,7 @@ from lerobot.robots import (  # noqa: F401
     reachy2,
     so_follower,
     unitree_g1,
+    isaac_piper,
 )
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
@@ -118,6 +120,7 @@ from lerobot.teleoperators import (  # noqa: F401
     omx_leader,
     reachy2_teleoperator,
     so_leader,
+    ros2,
 )
 from lerobot.teleoperators.keyboard.teleop_keyboard import KeyboardTeleop
 from lerobot.utils.constants import ACTION, OBS_STR
@@ -134,8 +137,10 @@ from lerobot.utils.utils import (
     get_safe_torch_device,
     init_logging,
     log_say,
+    get_random_pos_ori,
 )
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
+from pyglet.libs.x11.xlib import None_
 
 
 @dataclass
@@ -202,7 +207,7 @@ class RecordConfig:
     # Whether to  display compressed images in Rerun
     display_compressed_images: bool = False
     # Use vocal synthesis to read events.
-    play_sounds: bool = True
+    play_sounds: bool = False
     # Resume recording on an existing dataset.
     resume: bool = False
 
@@ -279,6 +284,7 @@ def record_loop(
     display_data: bool = False,
     display_compressed_images: bool = False,
 ):
+    logging.info("Starting recording loop")
     if dataset is not None and dataset.fps != fps:
         raise ValueError(f"The dataset fps should be equal to requested fps ({dataset.fps} != {fps}).")
 
@@ -313,8 +319,15 @@ def record_loop(
         preprocessor.reset()
         postprocessor.reset()
 
+    # When it is reset env loop
+    if dataset is None:
+        logging.info(f"dataset is None. Should be reset")
+        pos, quat = get_random_pos_ori()
+        robot.reset_env(pos, quat)
+
     timestamp = 0
     start_episode_t = time.perf_counter()
+    logging.info(f"start_episode_t: {start_episode_t}")
     while timestamp < control_time_s:
         start_loop_t = time.perf_counter()
 
@@ -348,7 +361,6 @@ def record_loop(
 
         elif policy is None and isinstance(teleop, Teleoperator):
             act = teleop.get_action()
-
             # Applies a pipeline to the raw teleop action, default is IdentityProcessor
             act_processed_teleop = teleop_action_processor((act, obs))
 
@@ -385,6 +397,7 @@ def record_loop(
         if dataset is not None:
             action_frame = build_dataset_frame(dataset.features, action_values, prefix=ACTION)
             frame = {**observation_frame, **action_frame, "task": single_task}
+            # logging.info(f"frame finally: {frame}")
             dataset.add_frame(frame)
 
         if display_data:
@@ -415,20 +428,31 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
 
     teleop_action_processor, robot_action_processor, robot_observation_processor = make_default_processors()
 
-    dataset_features = combine_feature_dicts(
-        aggregate_pipeline_dataset_features(
-            pipeline=teleop_action_processor,
-            initial_features=create_initial_features(
-                action=robot.action_features
-            ),  # TODO(steven, pepijn): in future this should be come from teleop or policy
-            use_videos=cfg.dataset.video,
-        ),
-        aggregate_pipeline_dataset_features(
-            pipeline=robot_observation_processor,
-            initial_features=create_initial_features(observation=robot.observation_features),
-            use_videos=cfg.dataset.video,
-        ),
-    )
+    obs_features = robot.observation_features.copy()  # keep the original ft
+    obs_state = obs_features.pop("state", {})
+    dataset_features = {
+        "action": robot.action_features,
+        "observation.state": obs_state,
+        **{
+            f"observation.images.{key}": value
+            for key, value in obs_features.items()
+        }
+    }
+    
+    # dataset_features = combine_feature_dicts(
+    #     aggregate_pipeline_dataset_features(
+    #         pipeline=teleop_action_processor,
+    #         initial_features=create_initial_features(
+    #             action=robot.action_features
+    #         ),  # TODO(steven, pepijn): in future this should be come from teleop or policy
+    #         use_videos=cfg.dataset.video,
+    #     ),
+    #     aggregate_pipeline_dataset_features(
+    #         pipeline=robot_observation_processor,
+    #         initial_features=create_initial_features(observation=robot.observation_features),
+    #         use_videos=cfg.dataset.video,
+    #     ),
+    # )
 
     dataset = None
     listener = None
@@ -488,24 +512,31 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
         with VideoEncodingManager(dataset):
             recorded_episodes = 0
             while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
-                log_say(f"Recording episode {dataset.num_episodes}", cfg.play_sounds)
-                record_loop(
-                    robot=robot,
-                    events=events,
-                    fps=cfg.dataset.fps,
-                    teleop_action_processor=teleop_action_processor,
-                    robot_action_processor=robot_action_processor,
-                    robot_observation_processor=robot_observation_processor,
-                    teleop=teleop,
-                    policy=policy,
-                    preprocessor=preprocessor,
-                    postprocessor=postprocessor,
-                    dataset=dataset,
-                    control_time_s=cfg.dataset.episode_time_s,
-                    single_task=cfg.dataset.single_task,
-                    display_data=cfg.display_data,
-                    display_compressed_images=display_compressed_images,
-                )
+                logging.info(f"Waiting for [SPACE] to start recording episode {recorded_episodes}...")
+                while not events["start_recording"] and not events["stop_recording"]:
+                    robot.world.step(render=True)
+
+                log_say(f"Recording episode {recorded_episodes}", cfg.play_sounds)
+                try:
+                    record_loop(
+                        robot=robot,
+                        events=events,
+                        fps=cfg.dataset.fps,
+                        teleop_action_processor=teleop_action_processor,
+                        robot_action_processor=robot_action_processor,
+                        robot_observation_processor=robot_observation_processor,
+                        teleop=teleop,
+                        policy=policy,
+                        preprocessor=preprocessor,
+                        postprocessor=postprocessor,
+                        dataset=dataset,
+                        control_time_s=cfg.dataset.episode_time_s,
+                        single_task=cfg.dataset.single_task,
+                        display_data=cfg.display_data,
+                        display_compressed_images=display_compressed_images,
+                    )
+                except e:
+                    logging.error(f"{e}")
 
                 # Execute a few seconds without recording to give time to manually reset the environment
                 # Skip reset for the last episode to be recorded
@@ -545,17 +576,23 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
 
         if dataset:
             dataset.finalize()
+            log_say("dataset Finalize", cfg.play_sounds)
 
         if robot.is_connected:
             robot.disconnect()
+            log_say("robot Disconnect", cfg.play_sounds)
         if teleop and teleop.is_connected:
             teleop.disconnect()
+            log_say("teleop Disconnect", cfg.play_sounds)
 
         if not is_headless() and listener:
             listener.stop()
+            log_say("Listener Stopped", cfg.play_sounds)
 
         if cfg.dataset.push_to_hub:
+            log_say("Push to hub", cfg.play_sounds)
             dataset.push_to_hub(tags=cfg.dataset.tags, private=cfg.dataset.private)
+            log_say("Push to hub complete", cfg.play_sounds)
 
         log_say("Exiting", cfg.play_sounds)
     return dataset

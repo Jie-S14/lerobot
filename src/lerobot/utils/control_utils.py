@@ -135,6 +135,8 @@ def init_keyboard_listener():
     events["exit_early"] = False
     events["rerecord_episode"] = False
     events["stop_recording"] = False
+    # Default is False (do not start) so callers can wait for this flag to become True.
+    events["start_recording"] = False
 
     if is_headless():
         logging.warning(
@@ -151,14 +153,24 @@ def init_keyboard_listener():
             if key == keyboard.Key.right:
                 print("Right arrow key pressed. Exiting loop...")
                 events["exit_early"] = True
+                events["start_recording"] = False
             elif key == keyboard.Key.left:
                 print("Left arrow key pressed. Exiting loop and rerecord the last episode...")
                 events["rerecord_episode"] = True
                 events["exit_early"] = True
+                events["start_recording"] = False
             elif key == keyboard.Key.esc:
                 print("Escape key pressed. Stopping data recording...")
                 events["stop_recording"] = True
                 events["exit_early"] = True
+                events["start_recording"] = False
+            elif key == keyboard.Key.space:
+                # Start recording command (useful to trigger from another app or via global key)
+                print("Start recording command received (Space).")
+                events["start_recording"] = True
+                events["exit_early"] = False
+                events["stop_recording"] = False
+                events["rerecord_episode"] = False
         except Exception as e:
             print(f"Error handling key press: {e}")
 
