@@ -19,7 +19,7 @@ import torch
 
 from lerobot.robots.config import RobotConfig
 
-from .constants import (
+from lerobot.async_inference.constants import (
     DEFAULT_FPS,
     DEFAULT_INFERENCE_LATENCY,
     DEFAULT_OBS_QUEUE_TIMEOUT,

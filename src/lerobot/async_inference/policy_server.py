@@ -43,15 +43,12 @@ from lerobot.processor import (
     PolicyAction,
     PolicyProcessorPipeline,
 )
-from lerobot.transport import (
-    services_pb2,  # type: ignore
-    services_pb2_grpc,  # type: ignore
-)
+from lerobot.transport import services_pb2, services_pb2_grpc
 from lerobot.transport.utils import receive_bytes_in_chunks
 
-from .configs import PolicyServerConfig
-from .constants import SUPPORTED_POLICIES
-from .helpers import (
+from lerobot.async_inference.configs import PolicyServerConfig
+from lerobot.async_inference.constants import SUPPORTED_POLICIES
+from lerobot.async_inference.helpers import (
     FPSTracker,
     Observation,
     RemotePolicyConfig,
@@ -180,7 +177,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         receive_time = time.time()  # comparing timestamps so need time.time()
         start_deserialize = time.perf_counter()
         received_bytes = receive_bytes_in_chunks(
-            request_iterator, None, self.shutdown_event, self.logger
+            request_iterator, None, self.shutdown_event, self.logger.name
         )  # blocking call while looping over request_iterator
         timed_observation = pickle.loads(received_bytes)  # nosec
         deserialize_time = time.perf_counter() - start_deserialize
@@ -209,7 +206,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         if not self._enqueue_observation(
             timed_observation  # wrapping a RawObservation
         ):
-            self.logger.debug(f"Observation #{obs_timestep} has been filtered out")
+            self.logger.debug(f"Observation #{obs_timestep} has been filtered out") # because it is not a must_go
 
         return services_pb2.Empty()
 

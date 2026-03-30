@@ -53,10 +53,8 @@ def test_async_inference_e2e(monkeypatch):
     from lerobot.async_inference.policy_server import PolicyServer
     from lerobot.async_inference.robot_client import RobotClient
     from lerobot.robots.utils import make_robot_from_config
-    from lerobot.transport import (
-        services_pb2,  # type: ignore
-        services_pb2_grpc,  # type: ignore
-    )
+    from lerobot.transport.pb2_6310 import services_pb2_grpc
+    from lerobot.transport.pb2_6310 import services_pb2
     from tests.mocks.mock_robot import MockRobotConfig
 
     # Create a stub policy similar to test_policy_server.py

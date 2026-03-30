@@ -49,6 +49,7 @@ import torch
 
 from lerobot.cameras.opencv.configuration_opencv import OpenCVCameraConfig  # noqa: F401
 from lerobot.cameras.realsense.configuration_realsense import RealSenseCameraConfig  # noqa: F401
+from lerobot.cameras.isaac.configuration_isaac import IsaacCameraConfig  # noqa: F401
 from lerobot.robots import (  # noqa: F401
     Robot,
     RobotConfig,
@@ -57,16 +58,14 @@ from lerobot.robots import (  # noqa: F401
     make_robot_from_config,
     omx_follower,
     so_follower,
+    isaac_piper,
 )
-from lerobot.transport import (
-    services_pb2,  # type: ignore
-    services_pb2_grpc,  # type: ignore
-)
+from lerobot.transport import services_pb2, services_pb2_grpc
 from lerobot.transport.utils import grpc_channel_options, send_bytes_in_chunks
 
-from .configs import RobotClientConfig
-from .constants import SUPPORTED_ROBOTS
-from .helpers import (
+from lerobot.async_inference.configs import RobotClientConfig
+from lerobot.async_inference.constants import SUPPORTED_ROBOTS
+from lerobot.async_inference.helpers import (
     Action,
     FPSTracker,
     Observation,
@@ -154,10 +153,11 @@ class RobotClient:
             policy_setup = services_pb2.PolicySetup(data=policy_config_bytes)
 
             self.logger.info("Sending policy instructions to policy server")
-            self.logger.debug(
+            self.logger.info(
                 f"Policy type: {self.policy_config.policy_type} | "
                 f"Pretrained name or path: {self.policy_config.pretrained_name_or_path} | "
-                f"Device: {self.policy_config.device}"
+                f"Device: {self.policy_config.device} | "
+                f"Send policy_setup time: {time.perf_counter()}"
             )
 
             self.stub.SendPolicyInstructions(policy_setup)
@@ -413,6 +413,8 @@ class RobotClient:
             raw_observation: RawObservation = self.robot.get_observation()
             raw_observation["task"] = task
 
+            # self.logger.info(f"raw_observation: {raw_observation}")
+
             with self.latest_action_lock:
                 latest_action = self.latest_action
 
@@ -464,8 +466,11 @@ class RobotClient:
         _performed_action = None
         _captured_observation = None
 
+        self.robot.world.reset()
+
         while self.running:
             control_loop_start = time.perf_counter()
+            self.robot.world.step(render=True)
             """Control loop: (1) Performing actions, when available"""
             if self.actions_available():
                 _performed_action = self.control_loop_action(verbose)

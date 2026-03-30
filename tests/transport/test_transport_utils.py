@@ -60,7 +60,8 @@ def test_bytes_buffer_size_large_buffer():
 
 @require_package("grpcio", "grpc")
 def test_send_bytes_in_chunks_empty_data():
-    from lerobot.transport.utils import send_bytes_in_chunks, services_pb2
+    from lerobot.transport.utils import send_bytes_in_chunks
+    from lerobot.transport.pb2_6310 import services_pb2
 
     """Test sending empty data."""
     message_class = services_pb2.InteractionMessage
@@ -70,7 +71,8 @@ def test_send_bytes_in_chunks_empty_data():
 
 @require_package("grpcio", "grpc")
 def test_single_chunk_small_data():
-    from lerobot.transport.utils import send_bytes_in_chunks, services_pb2
+    from lerobot.transport.utils import send_bytes_in_chunks
+    from lerobot.transport.pb2_6310 import services_pb2
 
     """Test data that fits in a single chunk."""
     data = b"Some data"
@@ -84,7 +86,8 @@ def test_single_chunk_small_data():
 
 @require_package("grpcio", "grpc")
 def test_not_silent_mode():
-    from lerobot.transport.utils import send_bytes_in_chunks, services_pb2
+    from lerobot.transport.utils import send_bytes_in_chunks
+    from lerobot.transport.pb2_6310 import services_pb2
 
     """Test not silent mode."""
     data = b"Some data"
@@ -96,7 +99,8 @@ def test_not_silent_mode():
 
 @require_package("grpcio", "grpc")
 def test_send_bytes_in_chunks_large_data():
-    from lerobot.transport.utils import CHUNK_SIZE, send_bytes_in_chunks, services_pb2
+    from lerobot.transport.utils import CHUNK_SIZE, send_bytes_in_chunks
+    from lerobot.transport.pb2_6310 import services_pb2
 
     """Test sending large data."""
     data = b"x" * (CHUNK_SIZE * 2 + 1000)
@@ -113,7 +117,8 @@ def test_send_bytes_in_chunks_large_data():
 
 @require_package("grpcio", "grpc")
 def test_send_bytes_in_chunks_large_data_with_exact_chunk_size():
-    from lerobot.transport.utils import CHUNK_SIZE, send_bytes_in_chunks, services_pb2
+    from lerobot.transport.utils import CHUNK_SIZE, send_bytes_in_chunks
+    from lerobot.transport.pb2_6310 import services_pb2
 
     """Test sending large data with exact chunk size."""
     data = b"x" * CHUNK_SIZE
@@ -140,7 +145,8 @@ def test_receive_bytes_in_chunks_empty_data():
 
 @require_package("grpcio", "grpc")
 def test_receive_bytes_in_chunks_single_chunk():
-    from lerobot.transport.utils import receive_bytes_in_chunks, services_pb2
+    from lerobot.transport.utils import receive_bytes_in_chunks
+    from lerobot.transport.pb2_6310 import services_pb2
 
     """Test receiving a single chunk message."""
     queue = Queue()
@@ -159,7 +165,8 @@ def test_receive_bytes_in_chunks_single_chunk():
 
 @require_package("grpcio", "grpc")
 def test_receive_bytes_in_chunks_single_not_end_chunk():
-    from lerobot.transport.utils import receive_bytes_in_chunks, services_pb2
+    from lerobot.transport.utils import receive_bytes_in_chunks
+    from lerobot.transport.pb2_6310 import services_pb2
 
     """Test receiving a single chunk message."""
     queue = Queue()
@@ -177,7 +184,8 @@ def test_receive_bytes_in_chunks_single_not_end_chunk():
 
 @require_package("grpcio", "grpc")
 def test_receive_bytes_in_chunks_multiple_chunks():
-    from lerobot.transport.utils import receive_bytes_in_chunks, services_pb2
+    from lerobot.transport.utils import receive_bytes_in_chunks
+    from lerobot.transport.pb2_6310 import services_pb2
 
     """Test receiving a multi-chunk message."""
     queue = Queue()
@@ -201,7 +209,8 @@ def test_receive_bytes_in_chunks_multiple_chunks():
 
 @require_package("grpcio", "grpc")
 def test_receive_bytes_in_chunks_multiple_messages():
-    from lerobot.transport.utils import receive_bytes_in_chunks, services_pb2
+    from lerobot.transport.utils import receive_bytes_in_chunks
+    from lerobot.transport.pb2_6310 import services_pb2
 
     """Test receiving multiple complete messages in sequence."""
     queue = Queue()
@@ -237,7 +246,8 @@ def test_receive_bytes_in_chunks_multiple_messages():
 
 @require_package("grpcio", "grpc")
 def test_receive_bytes_in_chunks_shutdown_during_receive():
-    from lerobot.transport.utils import receive_bytes_in_chunks, services_pb2
+    from lerobot.transport.utils import receive_bytes_in_chunks
+    from lerobot.transport.pb2_6310 import services_pb2
 
     """Test that shutdown event stops receiving mid-stream."""
     queue = Queue()
@@ -261,7 +271,8 @@ def test_receive_bytes_in_chunks_shutdown_during_receive():
 
 @require_package("grpcio", "grpc")
 def test_receive_bytes_in_chunks_only_begin_chunk():
-    from lerobot.transport.utils import receive_bytes_in_chunks, services_pb2
+    from lerobot.transport.utils import receive_bytes_in_chunks
+    from lerobot.transport.pb2_6310 import services_pb2
 
     """Test receiving only a BEGIN chunk without END."""
     queue = Queue()
@@ -281,7 +292,8 @@ def test_receive_bytes_in_chunks_only_begin_chunk():
 
 @require_package("grpcio", "grpc")
 def test_receive_bytes_in_chunks_missing_begin():
-    from lerobot.transport.utils import receive_bytes_in_chunks, services_pb2
+    from lerobot.transport.utils import receive_bytes_in_chunks
+    from lerobot.transport.pb2_6310 import services_pb2
 
     """Test receiving chunks starting with MIDDLE instead of BEGIN."""
     queue = Queue()

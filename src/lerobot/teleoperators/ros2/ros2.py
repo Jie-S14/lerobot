@@ -30,6 +30,7 @@ class Ros2Teleoperator(Teleoperator):
         self.node = None
         self.spin_thread: Optional[threading.Thread] = None
         self.sub = None
+        self._is_running = False
 
     def connect(self) -> None:
         if not _HAS_RCLPY:
@@ -38,6 +39,7 @@ class Ros2Teleoperator(Teleoperator):
             return
         rclpy.init(args=None)
         self.node = rclpy.create_node(self.config.node_name)
+        self._is_running = True
 
         # choose message class
         msg_cls = None
@@ -60,8 +62,9 @@ class Ros2Teleoperator(Teleoperator):
         logger.info("Ros2Teleoperator connected and subscribed to %s", self.config.topic)
 
     def _spin_loop(self):
-        while rclpy.ok():
-            rclpy.spin_once(self.node, timeout_sec=0.1)
+        while rclpy.ok() and self._is_running:
+            if self.node is not None:
+                rclpy.spin_once(self.node, timeout_sec=0.1)
 
     def _callback(self, msg) -> None:
         """Convert incoming ROS msg into a simple action dict and store latest."""
@@ -113,23 +116,30 @@ class Ros2Teleoperator(Teleoperator):
             return
         if self.node is None:
             return
+        self._is_running = False
+        self.spin_thread.join()
+        # destroy subscription and node
         try:
-            # destroy subscription and node
             if self.sub is not None:
-                try:
-                    self.node.destroy_subscription(self.sub)
-                except Exception:
-                    pass
+                self.node.destroy_subscription(self.sub)
                 self.sub = None
-            try:
-                self.node.destroy_node()
-            except Exception:
-                pass
-            # shutdown rclpy — careful if other nodes exist in the same process
-        finally:
+
+            # 记录节点引用并置为空，防止 spin 线程再次访问
+            temp_node = self.node
             self.node = None
+
+            # 销毁真正的节点对象
+            temp_node.destroy_node()
+
+        except Exception as e:
+            logger.error(f"Error during disconnect: {e}")
+        finally:
             if self.spin_thread is not None:
+                # 如果想彻底安全，这里可以 self.spin_thread.join(timeout=0.2)
+                self.spin_thread.join(timeout=0.2)
                 self.spin_thread = None
+            # shutdown rclpy — careful if other nodes exist in the same process
+
         logger.info("Ros2Teleoperator disconnected")
 
     @property

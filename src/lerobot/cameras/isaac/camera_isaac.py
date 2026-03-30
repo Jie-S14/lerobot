@@ -1,11 +1,8 @@
 import logging
-import time
 from threading import Event, Lock, Thread
 from typing import Any, Optional, Tuple
 
 import numpy as np
-
-from examples.lekiwi.teleoperate import FPS
 
 from ..camera import Camera
 from .configuration_isaac import IsaacCameraConfig
@@ -83,16 +80,16 @@ class IsaacCamera(Camera):
             logger.info("Omniverse imports failed but world/ros_topic present; continuing and expecting external subscription.")
 
         self._connected = True
-        logger.info(f"{self} connected (camera handle creation deferred if not found).")
 
-        # warmup: start internal read thread so latest_frame becomes available
         self.warmup()
-        logger.info(f"{self} warmup complete.")
+        logger.info(f"{self} connected (camera handle creation deferred if not found).")
 
     def warmup(self) -> None:
         if self.config.is_warmup:
+            logger.info(f"{self} warming up.")
             for _ in range(self.config.warmup_steps):
                 self.world.step()
+        logger.info(f"{self} warmup complete.")
 
     def read(self):
         frame = self._camera_handle.get_rgb()

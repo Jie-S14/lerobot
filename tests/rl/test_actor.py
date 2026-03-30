@@ -29,7 +29,8 @@ from tests.utils import require_package
 def create_learner_service_stub():
     import grpc
 
-    from lerobot.transport import services_pb2, services_pb2_grpc
+    from lerobot.transport.pb2_6310 import services_pb2_grpc
+    from lerobot.transport.pb2_6310 import services_pb2
 
     class MockLearnerService(services_pb2_grpc.LearnerServiceServicer):
         def __init__(self):

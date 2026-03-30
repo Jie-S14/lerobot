@@ -635,9 +635,7 @@ def hw_to_dataset_features(
     """
     features = {}
     joint_fts = {
-        key: ftype
-        for key, ftype in hw_features.items()
-        if ftype is float or (isinstance(ftype, PolicyFeature) and ftype.type != FeatureType.VISUAL)
+        key: ftype for key, ftype in hw_features.items() if ftype is float or (isinstance(ftype, PolicyFeature) and ftype.type != FeatureType.VISUAL)
     }
     cam_fts = {key: shape for key, shape in hw_features.items() if isinstance(shape, tuple)}
 
@@ -688,7 +686,7 @@ def build_dataset_frame(
         if key in DEFAULT_FEATURES or not key.startswith(prefix):
             continue
         elif ft["dtype"] == "float32" and len(ft["shape"]) == 1:
-            frame[key] = np.array([values[name] for name in ft["names"]], dtype=np.float32)
+            frame[key] = np.array([values[name] for name in ft["names"]], dtype=np.float32)     # integrate all floats to observation.state
         elif ft["dtype"] in ["image", "video"]:
             frame[key] = values[key.removeprefix(f"{prefix}.images.")]
 

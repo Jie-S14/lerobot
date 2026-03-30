@@ -72,7 +72,7 @@ from lerobot.rl.wandb_utils import WandBLogger
 from lerobot.robots import so_follower  # noqa: F401
 from lerobot.teleoperators import gamepad, so_leader  # noqa: F401
 from lerobot.teleoperators.utils import TeleopEvents
-from lerobot.transport import services_pb2_grpc
+from lerobot.transport.pb2_6310 import services_pb2_grpc
 from lerobot.transport.utils import (
     MAX_MESSAGE_SIZE,
     bytes_to_python_object,

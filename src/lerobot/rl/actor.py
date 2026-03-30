@@ -68,7 +68,7 @@ from lerobot.rl.queue import get_last_item_from_queue
 from lerobot.robots import so_follower  # noqa: F401
 from lerobot.teleoperators import gamepad, so_leader  # noqa: F401
 from lerobot.teleoperators.utils import TeleopEvents
-from lerobot.transport import services_pb2, services_pb2_grpc
+from lerobot.transport.pb2_6310 import services_pb2, services_pb2_grpc
 from lerobot.transport.utils import (
     bytes_to_state_dict,
     grpc_channel_options,

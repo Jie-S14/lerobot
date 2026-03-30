@@ -334,6 +334,12 @@ def record_loop(
         if events["exit_early"]:
             events["exit_early"] = False
             break
+        # joints = {name: 0.03 for name in robot.config.joint_names }
+        # robot.send_action(joints)
+        # logging.info(f"record_loop: before step: robot.joint_positions: {robot.joint_positions}")
+
+        robot.world.step(render=True)
+        # logging.info(f"record_loop: after step: robot.joint_positions: {robot.joint_positions}")
 
         # Get robot observation
         obs = robot.get_observation()
@@ -391,12 +397,12 @@ def record_loop(
         # Action can eventually be clipped using `max_relative_target`,
         # so action actually sent is saved in the dataset. action = postprocessor.process(action)
         # TODO(steven, pepijn, adil): we should use a pipeline step to clip the action, so the sent action is the action that we input to the robot.
-        _sent_action = robot.send_action(robot_action_to_send)
+        # _sent_action = robot.send_action(robot_action_to_send)
 
         # Write to dataset
         if dataset is not None:
             action_frame = build_dataset_frame(dataset.features, action_values, prefix=ACTION)
-            frame = {**observation_frame, **action_frame, "task": single_task}
+            frame = {**observation_frame, **action_frame, "task": single_task}  # integrate into one dict, not a big dict in dict
             # logging.info(f"frame finally: {frame}")
             dataset.add_frame(frame)
 
@@ -428,31 +434,31 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
 
     teleop_action_processor, robot_action_processor, robot_observation_processor = make_default_processors()
 
-    obs_features = robot.observation_features.copy()  # keep the original ft
-    obs_state = obs_features.pop("state", {})
-    dataset_features = {
-        "action": robot.action_features,
-        "observation.state": obs_state,
-        **{
-            f"observation.images.{key}": value
-            for key, value in obs_features.items()
-        }
-    }
-    
-    # dataset_features = combine_feature_dicts(
-    #     aggregate_pipeline_dataset_features(
-    #         pipeline=teleop_action_processor,
-    #         initial_features=create_initial_features(
-    #             action=robot.action_features
-    #         ),  # TODO(steven, pepijn): in future this should be come from teleop or policy
-    #         use_videos=cfg.dataset.video,
-    #     ),
-    #     aggregate_pipeline_dataset_features(
-    #         pipeline=robot_observation_processor,
-    #         initial_features=create_initial_features(observation=robot.observation_features),
-    #         use_videos=cfg.dataset.video,
-    #     ),
-    # )
+    # obs_features = robot.observation_features.copy()  # keep the original ft
+    # obs_state = obs_features.pop("state", {})
+    # dataset_features = {
+    #     "action": robot.action_features,
+    #     "observation.state": obs_state,
+    #     **{
+    #         f"observation.images.{key}": value
+    #         for key, value in obs_features.items()
+    #     }
+    # }
+
+    dataset_features = combine_feature_dicts(
+        aggregate_pipeline_dataset_features(
+            pipeline=teleop_action_processor,
+            initial_features=create_initial_features(
+                action=robot.action_features
+            ),  # TODO(steven, pepijn): in future this should be come from teleop or policy
+            use_videos=cfg.dataset.video,
+        ),
+        aggregate_pipeline_dataset_features(
+            pipeline=robot_observation_processor,
+            initial_features=create_initial_features(observation=robot.observation_features),
+            use_videos=cfg.dataset.video,
+        ),
+    )
 
     dataset = None
     listener = None
@@ -535,7 +541,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                         display_data=cfg.display_data,
                         display_compressed_images=display_compressed_images,
                     )
-                except e:
+                except Exception as e:
                     logging.error(f"{e}")
 
                 # Execute a few seconds without recording to give time to manually reset the environment

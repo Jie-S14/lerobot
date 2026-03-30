@@ -51,14 +51,21 @@ class IsaacPiper(Robot):
     def observation_features(self) -> dict:
         # example: images and joint states
         cam_features = {
-            f"{key}": {"dtype": "video", "shape": [value.height, value.width, 3], "name": ["height", "width", "channels"]} for key, value in self.cameras.items()
+            key: (value.height, value.width, 3) for key, value in self.cameras.items()
         }
-        state_feat = {"dtype": "float32", "shape": (len(self.joint_names),), "names": self.joint_names}
-        return {"state": state_feat, **cam_features}
+
+        return {**self.joints_features, **cam_features}
 
     @property
     def action_features(self) -> dict:
-        return {"dtype": "float32", "shape": (len(self.joint_names),), "names": self.joint_names}
+        return self.joints_features
+
+    @property
+    def joints_features(self) -> dict[str, type]:
+        joints_features = {
+            name: float for name in self.config.joint_names
+        }
+        return joints_features
 
     @property
     def is_connected(self) -> bool:
@@ -92,6 +99,7 @@ class IsaacPiper(Robot):
             from omni.isaac.core import World
             from omni.isaac.core.robots import Robot
             from omni.isaac.core.prims import XFormPrim
+            from omni.isaac.core.articulations import Articulation
 
             simulation_context = SimulationContext()
             open_stage(usd_path=self.config.stage_path)
@@ -99,7 +107,7 @@ class IsaacPiper(Robot):
             
             self.world = World(physics_dt=self.config.simulation_dt,
                              rendering_dt=self.config.simulation_dt)
-            self._robot = Robot(prim_path=self.config.robot_prim_path, 
+            self._robot = Articulation(prim_path=self.config.robot_prim_path,
                             name=self.config.robot_prim_path.split("/")[-1])
             self._object = XFormPrim(prim_path=self.config.object_prim_path,
                                     name=self.config.object_prim_path.split("/")[-1])
@@ -110,7 +118,7 @@ class IsaacPiper(Robot):
             for key, cam in self.cameras.items():
                 cam.attach_to_world(self.world)
                 cam.connect()
-            self.world.reset()
+            self.world.reset()      # Have to be after all initialization, otherwise no data
 
             logger.info("Connected to Isaac robot")
             
@@ -135,8 +143,7 @@ class IsaacPiper(Robot):
     def get_observation(self) -> RobotObservation:
         if not self.is_connected:
             raise RuntimeError("IsaacSimRobot not connected")
-        obs: RobotObservation = {}
-        self.world.step(render=True)
+
         # joints
         joint_positions = self._robot.get_joint_positions()
         obs = dict(zip(self.config.joint_names, joint_positions))
@@ -144,6 +151,8 @@ class IsaacPiper(Robot):
         for name in self.cameras.keys():
             try:
                 frame = self.cameras[name].read()
+                if frame is None or frame.shape[0] == 0:
+                    logger.warning(f"frame {frame} is empty. Probably because no world.reset() after camera initialization.")
                 obs[name] = frame
                 # Optionally include timestamps for alignment downstream
                 # obs[f"images.{name}_ts"] = ts
@@ -170,8 +179,23 @@ class IsaacPiper(Robot):
             cam.warmup()
 
     def send_action(self, action: RobotAction) -> RobotAction:
-        # Simulator follows moveit2
+        # For inference
+        from omni.isaac.core.utils.types import ArticulationAction
+
+        # joint_targets = np.array([0.1, -0.2, 0.3, -0.1, 0.3, 0.0, 0.04, 0.04])
+        joint_targets = np.array(list(action.values()))
+        joint_targets[-2:] *= 100   # old dataset post process
+        arti_action = ArticulationAction(joint_positions=joint_targets)
+        # joint_indices = self._robot.dof_names
+
+        self._robot.apply_action(arti_action)
+
+        # logger.info(f"send_action: self._robot.get_joint_positions(): {self._robot.get_joint_positions()}")
         return action
+
+    @property
+    def joint_positions(self):
+        return self._robot.get_joint_positions()
 
     def configure(self) -> None:
         # Any runtime config (control gains, camera settings etc.)
