@@ -124,10 +124,10 @@ class IsaacPiper(Robot):
             
         except Exception:
             # allow ROS-only mode
-            if self.config and getattr(self.config, "use_ros2_action_interface", False):
-                pass
-            else:
-                raise RuntimeError("Omniverse Isaac imports failed. Make sure Isaac Sim 4.2 Python environment is active.")
+            # if self.config and getattr(self.config, "use_ros2_action_interface", False):
+            #     pass
+            # else:
+            raise RuntimeError("Omniverse Isaac imports failed. Make sure Isaac Sim 4.2 Python environment is active.")
 
         self._connected = True
 

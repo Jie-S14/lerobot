@@ -381,6 +381,21 @@ class SmolVLMWithExpertModel(nn.Module):
                 expert_value_states,
             )
             att_outputs.append(att_output)
+
+            # 保存本次计算到的 cross-attn（eager_attention_forward 已把 last_attn_mean/last_attn_probs 写好）
+            try:
+                if getattr(self, "last_attn_mean", None) is not None:
+                    # 确保 detach 到 cpu 并 clone，避免后续覆盖或 GPU 引用
+                    self.cross_attn_means.append(self.last_attn_mean.detach().cpu().clone())
+                if getattr(self, "last_attn_probs", None) is not None:
+                    self.cross_attn_probs.append(self.last_attn_probs.detach().cpu().clone())
+                # 立刻清理临时缓冲，避免冗余占用内存与后续覆盖导致混淆
+                self.last_attn_mean = None
+                self.last_attn_probs = None
+
+            except Exception as e:
+                self.logger.error(e)
+
         else:
             att_outputs.append(None)
 
@@ -412,6 +427,12 @@ class SmolVLMWithExpertModel(nn.Module):
     ):
         models = [self.get_vlm_model().text_model, self.lm_expert]
         model_layers = self.get_model_layers(models)
+
+        # 每次 forward 清空本次要收集的 cross-attn 缓存（只保存按头平均的 mean，低开销）
+        # policy_server 可以读取 self.cross_attn_means[-1] 或按需聚合
+        self.cross_attn_means = []  # list of cpu tensors (B, Q, K)
+        self.cross_attn_probs = []  # optional: list of cpu tensors (B, H, Q, K)
+
         for hidden_states in inputs_embeds:
             # TODO this is very inefficient
             # dtype is always the same, batch size too (if > 1 len)
@@ -540,6 +561,22 @@ class SmolVLMWithExpertModel(nn.Module):
         masked_att_weights = torch.where(attention_mask[:, None, :, :], att_weights, big_neg)
         probs = nn.functional.softmax(masked_att_weights, dim=-1)
         probs = probs.to(dtype=value_states.dtype)
+
+        # 保存 attention map 以便可视化（非阻塞 detach 到 cpu）
+        # probs: (B, H, Q, K) — 选择保存完整 map 和按头平均的 heatmap
+        try:
+            # 保存轻量的按头平均 heatmap（(B, Q, K)），足够用于大多数可视化需求
+            self.last_attn_mean = probs.mean(dim=1).detach().cpu()
+            # 如果你需要保存完整 per-head probs 用于深度调试，可在实例上设置属性 `save_full_attn = True`
+            if getattr(self, "save_full_attn", False):
+                self.last_attn_probs = probs.detach().cpu()
+            else:
+                # 不保存完整 per-head probs 以节省显存/CPU 内存
+                self.last_attn_probs = None
+        except Exception:
+            # 不影响推理流程
+            self.last_attn_probs = None
+            self.last_attn_mean = None
 
         att_output = torch.matmul(probs, value_states.permute(0, 2, 1, 3))
 

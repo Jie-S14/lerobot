@@ -58,6 +58,10 @@ from lerobot.async_inference.helpers import (
     observations_similar,
     raw_observation_to_observation,
 )
+from lerobot.utils.visualization_utils import init_rerun, log_rerun_data, heatmap_to_rgb, blend_heatmap_on_image
+import torch.nn.functional as F
+import numpy as np
+import rerun as rr
 
 
 class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
@@ -224,12 +228,105 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
                 f"Running inference for observation #{obs.get_timestep()} (must_go: {obs.must_go})"
             )
 
+            # log_rerun_data(observation=obs.get_observation(), compress_images=True)
+
             with self._predicted_timesteps_lock:
                 self._predicted_timesteps.add(obs.get_timestep())
 
             start_time = time.perf_counter()
             action_chunk = self._predict_action_chunk(obs)
             inference_time = time.perf_counter() - start_time
+
+            # 如果模型保存了 attention map，就取出来并上传到 rerun
+            try:
+                attn = None
+                model = getattr(self.policy, "model", None)
+                if model is not None:
+                    vlm_expert = getattr(model, "vlm_with_expert", None)
+                    if vlm_expert is not None:
+                        # 优先使用保存的 cross-attn 列表（denoise 阶段 append 的条目）
+                        cross_list = getattr(vlm_expert, "cross_attn_means", None)
+                        if cross_list and len(cross_list) > 0:
+                            attn = cross_list[-1]  # 应为 cpu tensor (B, Q, K)
+                        else:
+                            # 兜底：使用 last_attn_mean（可能来自其他 attention 调用）
+                            attn = getattr(vlm_expert, "last_attn_mean", None)
+                        prefix_layout = getattr(vlm_expert, "last_prefix_layout", None)
+                        # 将 token-level attention (B, Q, K) -> key-level importance (K,)
+                        try:
+                            attn_np = attn.cpu().numpy()  # (B, Q, K)
+                            key_attn = attn_np[0].mean(axis=0)  # (K,)
+
+                            obs_raw = obs.get_observation()
+                            # 尝试从 observation 中读取原始图像尺寸（fallback 会使用 layout 中的 orig_hw 或 224x224）
+                            target_hw = None
+                            target_hw = (480, 640)
+                            # for img_key in (self.policy_image_features or []):
+                            #     if isinstance(obs_raw, dict) and img_key in obs_raw:
+                            #         img_data = obs_raw[img_key]
+                            #         try:
+                            #             # 支持 numpy / torch tensor / PIL-like ndarray
+                            #             if isinstance(img_data, torch.Tensor):
+                            #                 h, w = int(img_data.shape[-2]), int(img_data.shape[-1])
+                            #             else:
+                            #                 h, w = int(img_data.shape[-2]), int(img_data.shape[-1])
+                            #             target_hw = (h, w)
+                            #             break
+                            #         except Exception:
+                            #             target_hw = None
+
+                            attention_maps_per_image = {}
+                            if prefix_layout is not None:
+                                for layout in prefix_layout.get("image_layouts", []):
+                                    s, e = layout["start_idx"], layout["end_idx"]
+                                    h, w = layout["h"], layout["w"]
+                                    key_slice = key_attn[s:e]
+                                    if key_slice.size != h * w:
+                                        # 如果长度不匹配，尝试裁剪或填充
+                                        pad_or_trim = h * w
+                                        if key_slice.size > pad_or_trim:
+                                            key_slice = key_slice[:pad_or_trim]
+                                        else:
+                                            key_slice = np.pad(key_slice, (0, pad_or_trim - key_slice.size),
+                                                               mode="constant")
+                                    # reshape -> (1,1,h,w) 方便 interpolate
+                                    arr = torch.from_numpy(key_slice.reshape(1, 1, h, w).astype("float32"))
+                                    # 如果没有目标像素尺寸，优先使用 layout.orig_hw，否则 224x224
+                                    tgt_h, tgt_w = None, None
+                                    if target_hw is not None:
+                                        tgt_h, tgt_w = target_hw
+                                    elif layout.get("orig_hw") is not None:
+                                        tgt_h, tgt_w = layout["orig_hw"]
+                                    else:
+                                        tgt_h, tgt_w = 224, 224
+
+                                    try:
+                                        up = F.interpolate(arr, size=(tgt_h, tgt_w), mode="bilinear",
+                                                           align_corners=False)
+                                        heatmap = up.squeeze().cpu().numpy()
+                                        heat_rgb = heatmap_to_rgb(heatmap, cmap="magma")
+                                        # blended = blend_heatmap_on_image(obs_img, heat_rgb, alpha=0.55)
+                                    except Exception:
+                                        heatmap = arr.squeeze().cpu().numpy()
+
+                                    attention_maps_per_image[f"image_{layout['image_index']}"] = heat_rgb
+
+                            # 最后把 observation 和 attention_maps 一起发给 rerun（log_rerun_data 需要支持 attention_map dict）
+                            # log_rerun_data(observation=obs.get_observation(), compress_images=True)
+                            # log_rerun_data(observation=attention_maps_per_image)
+                            rr.log("camera/top", rr.Image(obs.get_observation()["top"]))
+                            rr.log("camera/wrist", rr.Image(obs.get_observation()["wrist"]))
+                            rr.log("camera/attn_top", rr.Image(attention_maps_per_image["image_0"]))
+                        except Exception as e:
+                            # fallback: 原有行为
+                            self.logger.error(f"Failed to map attention to images: {e}")
+                            # log_rerun_data(observation=obs.get_observation(), compress_images=True)
+                            rr.log("camera/top", rr.Image(obs.get_observation()["top"]))
+                            rr.log("camera/wrist", rr.Image(obs.get_observation()["wrist"]))
+                else:
+                    log_rerun_data(observation=obs.get_observation(), compress_images=True)
+            except Exception as e:
+                self.logger.info(f"Failed to log attention: {e}")
 
             start_time = time.perf_counter()
             actions_bytes = pickle.dumps(action_chunk)  # nosec
@@ -420,6 +517,9 @@ def serve(cfg: PolicyServerConfig):
 
     # Create the server instance first
     policy_server = PolicyServer(cfg)
+
+    # Start rerun.io
+    init_rerun("camera_demo")
 
     # Setup and start gRPC server
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=4))

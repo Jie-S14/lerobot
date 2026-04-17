@@ -708,6 +708,143 @@ class VLAFlowMatching(nn.Module):
 
         att_masks = att_masks.expand(bsize, -1)
 
+        # --- 记录更精确的 prefix layout，便于把 attention key index 映射回具体 image patch grid ---
+        try:
+            # image_layouts 列表按 image 顺序，记录每张图在 prefix 中的 token 范围与 patch grid
+            # 注意：start_idx 是 inclusive，end_idx 是 exclusive（Python 切片风格）
+            image_layouts = []
+            cur_idx = 0
+            # 按 embed 顺序重新推导（和上面构建 embs 时顺序一致）
+            for _img_idx, (img, img_mask) in enumerate(zip(images, img_masks, strict=False)):
+                if self.add_image_special_tokens:
+                    # start token length (通常为1)
+                    start_len = 1
+                    cur_idx += start_len
+
+                # num_img_embs 在上面构建时被计算为 img_emb.shape[1]
+                # 我们无法在这里直接访问 num_img_embs 的局部变量，因此从 embs/pad_masks 推断：
+                # 取在 cur_idx 位置之后第一个非-image 段的起始位置来确定长度较复杂，简化为：读取 img 的 embed 再计算
+                # 这里优先尝试通过 vision encoder 的 embedding 数量来确定 grid
+                try:
+                    img_emb = self.vlm_with_expert.embed_image(img)
+                    num_img_embs = img_emb.shape[1]
+                except Exception:
+                    # 兜底：尝试从 img_mask 推断
+                    num_img_embs = img_mask.shape[1] if img_mask.ndim == 2 else int(math.sqrt(img.numel()))
+
+                start = cur_idx
+                end = cur_idx + int(num_img_embs)
+
+                # # try infer patch grid (h,w)
+                # h = int(math.sqrt(num_img_embs))
+                # if h * h == num_img_embs:
+                #     w = h
+                # else:
+                #     # fallback: try integer division
+                #     w = num_img_embs // h if h > 0 else num_img_embs
+                #     if h * w != num_img_embs:
+                #         # 最后兜底：一维展平
+                #         h, w = num_img_embs, 1
+
+                # 优先从 vision model config 推导 patch grid（更精确），否则 fallback 到 sqrt 估计
+                # 取实际输出的 token 数作为基线
+                num_patches = int(num_img_embs)
+
+                # 尝试从 vision model config + 实际 resize 后图像尺寸推断理想 grid
+                h = None
+                w = None
+                try:
+                    vision_model = self.vlm_with_expert.get_vlm_model().vision_model
+                    vision_cfg = getattr(vision_model, "config", None)
+                    if vision_cfg is not None and hasattr(vision_cfg, "patch_size"):
+                        patch_size = vision_cfg.patch_size
+                        # 支持 patch_size int 或 (h,w)
+                        if isinstance(patch_size, (list, tuple)):
+                            p_h, p_w = int(patch_size[0]), int(patch_size[1])
+                        else:
+                            p_h = p_w = int(patch_size)
+                        # 使用当前传入的 img 的尺寸（经过 resize_with_pad 后的尺寸）来推断
+                        try:
+                            img_h, img_w = int(img.shape[2]), int(img.shape[3])
+                            if p_h > 0 and p_w > 0:
+                                expect_h = max(1, img_h // p_h)
+                                expect_w = max(1, img_w // p_w)
+                                # 如果期望的 patch grid 与实际 token 数匹配（或仅差类 token），直接采用
+                                if expect_h * expect_w == num_patches:
+                                    h, w = expect_h, expect_w
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+                # 如果上面未推断成功，基于 num_patches 与图像长宽比稳健分解为 h,w
+                if h is None or w is None:
+                    # 优先使用 resize 后的图像长宽比（如果可得），否则用方形近似
+                    try:
+                        img_h, img_w = int(img.shape[2]), int(img.shape[3])
+                        aspect = img_h / max(1.0, img_w)
+                    except Exception:
+                        aspect = 1.0
+
+                    # 初始尝试：根据长宽比估算 h
+                    h_est = max(1, int(round(math.sqrt(num_patches * aspect))))
+                    if h_est <= 0:
+                        h_est = int(math.sqrt(num_patches)) or 1
+                    # 寻找最接近且能整除 num_patches 的因子（从 h_est 向下搜索）
+                    found = False
+                    for cand_h in range(h_est, 0, -1):
+                        if num_patches % cand_h == 0:
+                            h = cand_h
+                            w = num_patches // cand_h
+                            found = True
+                            break
+                    if not found:
+                        # 如果没有整除因子，就取最接近的整形网格（允许最后一行/列填充）
+                        h = h_est
+                        w = int(math.ceil(num_patches / h))
+                        # 仍然保证整数
+                        h, w = int(h), int(w)
+                        # 注意：最后可能 h*w > num_patches，后续 reshape 时需裁剪或填充
+                # 到此 h,w 基于实际输出 token 数进行稳健推断
+                # import logging
+                # logging.log(20, f"h={h}, w={w}")
+
+                # 原始（或 resize 后）图像尺寸（H,W），如果可用则记录
+                try:
+                    orig_h, orig_w = img.shape[2], img.shape[3]
+                except Exception:
+                    orig_h, orig_w = None, None
+
+                image_layouts.append(
+                    {
+                        "image_index": _img_idx,
+                        "start_idx": int(start),
+                        "end_idx": int(end),
+                        "num_patches": int(num_img_embs),
+                        "h": int(h),
+                        "w": int(w),
+                        "orig_hw": (int(orig_h), int(orig_w)) if orig_h is not None else None,
+                    }
+                )
+
+                cur_idx = end
+                if self.add_image_special_tokens:
+                    # end token length (通常为1)
+                    cur_idx += 1
+
+            prefix_layout = {
+                "batch_size": bsize,
+                "total_prefix_len": pad_masks.shape[1],
+                "image_layouts": image_layouts,
+                "num_lang_embs": num_lang_embs,
+                "states_seq_len": states_seq_len,
+                "prefix_length": self.prefix_length,
+            }
+            # 存到 vlm_with_expert 上，policy_server 等上层可以直接读取
+            self.vlm_with_expert.last_prefix_layout = prefix_layout
+        except Exception:
+            self.vlm_with_expert.last_prefix_layout = None
+
         return embs, pad_masks, att_masks
 
     def embed_suffix(self, noisy_actions, timestep):

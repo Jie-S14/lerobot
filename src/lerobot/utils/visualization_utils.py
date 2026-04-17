@@ -17,6 +17,7 @@ import os
 
 import numpy as np
 import rerun as rr
+import matplotlib.pyplot as plt
 
 from lerobot.processor import RobotAction, RobotObservation
 
@@ -110,3 +111,30 @@ def log_rerun_data(
                     flat = v.flatten()
                     for i, vi in enumerate(flat):
                         rr.log(f"{key}_{i}", rr.Scalars(float(vi)))
+
+
+def heatmap_to_rgb(heat: np.ndarray, cmap: str = "jet", vmin: float | None = None, vmax: float | None = None):
+    """
+    heat: HxW float (not necessarily 0..1)
+    returns: HxWx3 uint8 RGB
+    """
+    if vmin is None:
+        vmin = float(np.percentile(heat, 5))
+    if vmax is None:
+        vmax = float(np.percentile(heat, 95))
+    # clip & normalize
+    norm = np.clip((heat - vmin) / (vmax - vmin + 1e-8), 0.0, 1.0)
+    cmap_f = plt.get_cmap(cmap)
+    colored = cmap_f(norm)[:, :, :3]  # RGBA -> RGB
+    return (colored * 255).astype(np.uint8)
+
+def blend_heatmap_on_image(image: np.ndarray, heat_rgb: np.ndarray, alpha: float = 0.5):
+    """
+    image: HxWx3 uint8
+    heat_rgb: HxWx3 uint8 (will be resized to image if sizes differ)
+    """
+    import cv2
+    if image.shape[:2] != heat_rgb.shape[:2]:
+        heat_rgb = cv2.resize(heat_rgb, (image.shape[1], image.shape[0]), interpolation=cv2.INTER_LINEAR)
+    blended = (image.astype(np.float32) * (1 - alpha) + heat_rgb.astype(np.float32) * alpha).astype(np.uint8)
+    return blended
