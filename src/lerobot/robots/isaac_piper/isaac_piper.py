@@ -1,12 +1,13 @@
+import json
 import logging
+from pathlib import Path
+import random
 import threading
-import time
-from typing import Any, Optional, Tuple
+from typing import Any, Optional
 
 import numpy as np
 
 from lerobot.cameras.utils import make_cameras_from_configs
-from lerobot.motors import MotorCalibration
 from lerobot.processor import RobotAction, RobotObservation
 from lerobot.robots.robot import Robot
 from .config_isaac_piper import IsaacPiperConfig
@@ -46,6 +47,11 @@ class IsaacPiper(Robot):
         self._ros2_publisher = None
         self._sim_thread: Optional[threading.Thread] = None
         self._sim_stop_event: Optional[threading.Event] = None
+
+        OBJ_CONFIG_PATH = Path(__file__).parent / "obj_config.json"
+        logger.info(f"Loading IsaacPiper config from {OBJ_CONFIG_PATH}")
+        with open(OBJ_CONFIG_PATH, "r", encoding="utf-8") as f:
+            self._obj_config = json.load(f)
 
     @property
     def observation_features(self) -> dict:
@@ -146,7 +152,7 @@ class IsaacPiper(Robot):
 
         # joints
         joint_positions = self._robot.get_joint_positions()
-        obs = dict(zip(self.config.joint_names, joint_positions))
+        obs = dict(zip(self.joint_names, joint_positions))
         # cameras
         for name in self.cameras.keys():
             try:
@@ -162,19 +168,52 @@ class IsaacPiper(Robot):
                 # obs[f"images.{name}_ts"] = None
         return obs
 
-    def move_obj(self, pos, quat) -> None:
+    def _get_random_obj_pos_ori(self):
+        """
+        Returns:
+            piper positions (x, y, z) and orientation
+        """
+        x_ran = round(random.uniform(-0.40, 0.40), 5)
+        y_ran = round(random.uniform(-0.20, 0.20), 5)
+        rot_ran = round(random.uniform(-10, 10), 3)
+        pos = [x_ran, y_ran, 0.78466]
+        ori = [0.0, 0.0, rot_ran]
+
+        logger = logging.getLogger(__name__)
+        logger.info(f"random OBJ_POS: {pos}, OBJ_ORI: {ori}")
+
+        return pos, ori
+
+    def _move_obj(self, pos, ori) -> None:
         # pos = [0.5, 0.5, 0.78466]
-        # quat = [1.0, 0.0, 0.0, 0.0]
+        # ori = [0.0, 0.0, 0.0]
+        from omni.isaac.core.utils.rotations import euler_angles_to_quat
+        quat = euler_angles_to_quat(np.array(ori), degrees=True)
+        logger.info(f"move_obj: {pos}, {ori}, {quat}")
         self._object.set_world_pose(
                 position=np.array(pos),
                 orientation=quat)  # (w, x,y,z)
-        tup, tuo = self._object.get_world_pose()
-        logger.info(f"self._object.get_world_pose(): {tup}, {tuo}")
+        # tup, tuo = self._object.get_world_pose()
+        # logger.info(f"self._object.get_world_pose(): {tup}, {tuo}")
 
-    def reset_env(self, position: list|None, quat: list|None) -> None:
+    def _get_random_arm_pose(self):
+        low_limits = np.array([-0.872665, 0.0, -1.5708, -0.785398, -0.785398, -0.785398, 0.0, -0.038])
+        high_limits = np.array([0.872665, 1.8326, 0.0, 0.785398, 0.785398, 0.785398, 0.038, 0.0])
+        random_joints = np.random.uniform(low=low_limits, high=high_limits)
+        ret = dict(zip(self.joint_names, random_joints))
+        return ret
+
+
+    def reset_env(self, ep: int) -> None:
         self.world.reset()  # reset() must before move_obj() otherwise reset() reloads USD
-        if position is not None and quat is not None:
-            self.move_obj(position, quat)
+        # pos, ori = self._get_random_obj_pos_ori()
+        pos = self._obj_config[ep]["position"]
+        ori = self._obj_config[ep]["orientation"]
+        if pos is not None and ori is not None:
+            logger.info(f"reset env: object pos: {pos}, ori: {ori}")
+            self._move_obj(pos, ori)
+            # act = self._get_random_arm_pose()
+            # self.send_action(act)     # does not work here if Isaac Sim listens to moveit2
         for cam in self.cameras.values():
             cam.warmup()
 
@@ -184,7 +223,7 @@ class IsaacPiper(Robot):
 
         # joint_targets = np.array([0.1, -0.2, 0.3, -0.1, 0.3, 0.0, 0.04, 0.04])
         joint_targets = np.array(list(action.values()))
-        joint_targets[-2:] *= 100   # old dataset post process
+        # joint_targets[-2:] *= 100   # old dataset post process
         arti_action = ArticulationAction(joint_positions=joint_targets)
         # joint_indices = self._robot.dof_names
 

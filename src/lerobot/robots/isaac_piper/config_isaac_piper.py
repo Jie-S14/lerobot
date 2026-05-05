@@ -8,9 +8,9 @@ from typing import Dict, List
 @dataclass
 class IsaacPiperConfig(RobotConfig):
     # URL/path to the USD stage or empty if connecting to running Isaac
-    stage_path: str = "/home/shenjie/ws/Piper_ros_moveit/src/piper/piper_moveit_config/config/piper/piper_cube.usd"
+    stage_path: str = "/home/shenjie/ws/Piper_ros_moveit/src/piper/piper_moveit_config/config/piper/piper_white.usd"
     # Path to robot prim in USD (e.g. "/World/robot")
-    robot_prim_path: str = "/World/piper"
+    robot_prim_path: str = "/World/piper/base_link"
     # Path to object to interact with (e.g. a block to push)
     object_prim_path: str = "/World/red_block"
     # Isaac Sim fps

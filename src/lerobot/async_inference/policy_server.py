@@ -34,6 +34,7 @@ from pprint import pformat
 from queue import Empty, Queue
 from typing import Any
 
+import cv2
 import draccus
 import grpc
 import torch
@@ -260,7 +261,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
                             obs_raw = obs.get_observation()
                             # 尝试从 observation 中读取原始图像尺寸（fallback 会使用 layout 中的 orig_hw 或 224x224）
                             target_hw = None
-                            target_hw = (480, 640)
+                            target_hw = (512, 512)
                             # for img_key in (self.policy_image_features or []):
                             #     if isinstance(obs_raw, dict) and img_key in obs_raw:
                             #         img_data = obs_raw[img_key]
@@ -310,13 +311,51 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
                                         heatmap = arr.squeeze().cpu().numpy()
 
                                     attention_maps_per_image[f"image_{layout['image_index']}"] = heat_rgb
+                                # # For language instruction
+                                # lang_tokens = ["BOS", "Approach", "the", "red", "cube", ",", "pick", "it", "up", ",",
+                                #                "move", "it", "to", "the", "purple", "box", ",", "release", "it", ",",
+                                #                "return", "to", "the", "initial", "position", ".", "EOS"]
+                                # # --- Token strip (render text into an image) ---
+                                # H = 40
+                                # W = len(lang_tokens) * 40  # one cell per token
+                                # lang_img = np.ones((H, W, 3), dtype=np.uint8) * 255
+                                #
+                                # for i, tok in enumerate(lang_tokens):
+                                #     x = i * 40 + 5
+                                #     cv2.putText(
+                                #         lang_img,
+                                #         tok,
+                                #         (x, 25),
+                                #         cv2.FONT_HERSHEY_SIMPLEX,
+                                #         0.4,
+                                #         (0, 0, 0),
+                                #         1,
+                                #         cv2.LINE_AA,
+                                #     )
+                                # # Attention strip
+                                # lang_attn = key_attn[128: 155]
+                                # lang_attn = lang_attn / lang_attn.max()
+                                # lang_attn_heatmap = lang_attn.reshape(1, -1)
+                                # lang_attn_heatmap = np.repeat(lang_attn_heatmap, H, axis=0)
+                                # lang_attn_heatmap = np.repeat(lang_attn_heatmap, H, axis=1)
+                                # lang_attn_heatmap_img = (lang_attn_heatmap * 255).astype(np.uint8)
+                                # lang_attn_heatmap_img = cv2.applyColorMap(lang_attn_heatmap_img, cv2.COLORMAP_JET)
+                            # rr.log("camera/top", rr.Image(obs.get_observation()["top"]))
+                            # rr.log("camera/wrist", rr.Image(obs.get_observation()["wrist"]))
+                            # rr.log("camera/attn_top", rr.Image(attention_maps_per_image["image_0"]))
+                            # rr.log("camera/attn_wrist", rr.Image(attention_maps_per_image["image_1"]))
+                            overlay_top = cv2.addWeighted(obs.get_observation()["top"], 0.5,
+                                                          attention_maps_per_image["image_0"], 0.5,
+                                                          0)
+                            overlay_wrist = cv2.addWeighted(obs.get_observation()["wrist"], 0.5,
+                                                          attention_maps_per_image["image_1"], 0.5,
+                                                          0)
 
-                            # 最后把 observation 和 attention_maps 一起发给 rerun（log_rerun_data 需要支持 attention_map dict）
-                            # log_rerun_data(observation=obs.get_observation(), compress_images=True)
-                            # log_rerun_data(observation=attention_maps_per_image)
-                            rr.log("camera/top", rr.Image(obs.get_observation()["top"]))
-                            rr.log("camera/wrist", rr.Image(obs.get_observation()["wrist"]))
-                            rr.log("camera/attn_top", rr.Image(attention_maps_per_image["image_0"]))
+                            rr.log("camera/top_overlay", rr.Image(overlay_top))
+                            rr.log("camera/wrist_overlay", rr.Image(overlay_wrist))
+                            # rr.log("lang/overlay", rr.Image(np.vstack([lang_attn_heatmap_img, lang_img])))
+                            # rr.log("lang/attn", rr.Tensor(lang_attn.reshape(1, -1)))
+                            # rr.log("lang/tokens", rr.Image(lang_img))
                         except Exception as e:
                             # fallback: 原有行为
                             self.logger.error(f"Failed to map attention to images: {e}")

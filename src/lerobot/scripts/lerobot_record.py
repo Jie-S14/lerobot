@@ -137,10 +137,8 @@ from lerobot.utils.utils import (
     get_safe_torch_device,
     init_logging,
     log_say,
-    get_random_pos_ori,
 )
 from lerobot.utils.visualization_utils import init_rerun, log_rerun_data
-from pyglet.libs.x11.xlib import None_
 
 
 @dataclass
@@ -283,6 +281,7 @@ def record_loop(
     single_task: str | None = None,
     display_data: bool = False,
     display_compressed_images: bool = False,
+    recorded_episodes: int | None = None,
 ):
     logging.info("Starting recording loop")
     if dataset is not None and dataset.fps != fps:
@@ -322,8 +321,8 @@ def record_loop(
     # When it is reset env loop
     if dataset is None:
         logging.info(f"dataset is None. Should be reset")
-        pos, quat = get_random_pos_ori()
-        robot.reset_env(pos, quat)
+        # pos, ori = get_random_pos_ori()
+        robot.reset_env(ep=recorded_episodes)   # 1. random obj pos
 
     timestamp = 0
     start_episode_t = time.perf_counter()
@@ -517,6 +516,27 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
 
         with VideoEncodingManager(dataset):
             recorded_episodes = 0
+
+            log_say("Reset the environment", cfg.play_sounds)
+
+            # reset g1 robot
+            if robot.name == "unitree_g1":
+                robot.reset()
+
+            record_loop(
+                robot=robot,
+                events=events,
+                fps=cfg.dataset.fps,
+                teleop_action_processor=teleop_action_processor,
+                robot_action_processor=robot_action_processor,
+                robot_observation_processor=robot_observation_processor,
+                teleop=teleop,
+                control_time_s=cfg.dataset.reset_time_s,
+                single_task=cfg.dataset.single_task,
+                display_data=cfg.display_data,
+                recorded_episodes=recorded_episodes,
+            )
+
             while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
                 logging.info(f"Waiting for [SPACE] to start recording episode {recorded_episodes}...")
                 while not events["start_recording"] and not events["stop_recording"]:
@@ -566,6 +586,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                         control_time_s=cfg.dataset.reset_time_s,
                         single_task=cfg.dataset.single_task,
                         display_data=cfg.display_data,
+                        recorded_episodes=recorded_episodes+1,
                     )
 
                 if events["rerecord_episode"]:

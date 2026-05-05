@@ -24,7 +24,6 @@ from copy import copy, deepcopy
 from datetime import datetime
 from pathlib import Path
 from statistics import mean
-import random
 
 import numpy as np
 import torch
@@ -283,26 +282,6 @@ def get_elapsed_time_in_days_hours_minutes_seconds(elapsed_time_s: float):
     minutes = int(elapsed_time_s // 60)
     seconds = elapsed_time_s % 60
     return days, hours, minutes, seconds
-
-def get_random_pos_ori():
-    """
-    Returns:
-        piper positions (x, y, z) and orientation
-    """
-    from scipy.spatial.transform import Rotation as R
-    x_ran = round(random.uniform(0.30, 0.38), 2)
-    y_ran = round(random.uniform(-0.18, 0.18), 2)
-    rot_ran = round(random.uniform(-10, 10), 1)
-    pos = [x_ran, y_ran, 0.78466]
-    ori = [0.0, 0.0, rot_ran]
-    quat = R.from_euler('xyz', ori).as_quat()
-    # shift from x,y,z,w to w,x,y,z
-    quat_new = np.roll(quat, shift=1)
-
-    logger = logging.getLogger(__name__)
-    logger.info(f"random OBJ_POS: {pos}, OBJ_ORI: {ori}, QUAT: {quat}, QUAT_NEW: {quat_new}")
-
-    return pos, quat_new
 
 
 class SuppressProgressBars:
