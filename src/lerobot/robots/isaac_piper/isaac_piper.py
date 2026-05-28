@@ -37,6 +37,7 @@ class IsaacPiper(Robot):
         self._app = None
         self._robot = None
         self._object = None
+        self._goal = None
         # store provided/shared world
         self.world: Optional[Any] = world
         # prepare camera wrappers but do not connect them yet
@@ -48,10 +49,13 @@ class IsaacPiper(Robot):
         self._sim_thread: Optional[threading.Thread] = None
         self._sim_stop_event: Optional[threading.Event] = None
 
-        OBJ_CONFIG_PATH = Path(__file__).parent / "obj_config.json"
-        logger.info(f"Loading IsaacPiper config from {OBJ_CONFIG_PATH}")
-        with open(OBJ_CONFIG_PATH, "r", encoding="utf-8") as f:
-            self._obj_config = json.load(f)
+        EP_CONF_PATH = Path(__file__).parent / self.config.ep_conf_path
+        POS_CONFIG_PATH = Path(__file__).parent / self.config.pos_conf_path
+        logger.info(f"Loading recording config from {EP_CONF_PATH} and {POS_CONFIG_PATH}:")
+        with open(EP_CONF_PATH, "r", encoding="utf-8") as f:
+            self._ep_conf = json.load(f)
+        with open(POS_CONFIG_PATH, "r", encoding="utf-8") as f:
+            self._pos_conf = json.load(f)
 
     @property
     def observation_features(self) -> dict:
@@ -117,9 +121,12 @@ class IsaacPiper(Robot):
                             name=self.config.robot_prim_path.split("/")[-1])
             self._object = XFormPrim(prim_path=self.config.object_prim_path,
                                     name=self.config.object_prim_path.split("/")[-1])
+            self._goal = XFormPrim(prim_path=self.config.goal_prim_path,
+                                    name=self.config.goal_prim_path.split("/")[-1])
 
             self.world.scene.add(self._robot)
             self.world.scene.add(self._object)
+            self.world.scene.add(self._goal)
 
             for key, cam in self.cameras.items():
                 cam.attach_to_world(self.world)
@@ -168,33 +175,64 @@ class IsaacPiper(Robot):
                 # obs[f"images.{name}_ts"] = None
         return obs
 
-    def _get_random_obj_pos_ori(self):
+
+    def _get_random_obj_pos_ori(self, obj_idx):
         """
         Returns:
-            piper positions (x, y, z) and orientation
+            object positions (x, y, z) and orientation
         """
-        x_ran = round(random.uniform(-0.40, 0.40), 5)
-        y_ran = round(random.uniform(-0.20, 0.20), 5)
-        rot_ran = round(random.uniform(-10, 10), 3)
-        pos = [x_ran, y_ran, 0.78466]
-        ori = [0.0, 0.0, rot_ran]
+        # check conf files to see data structure
+        obj = self._pos_conf["object"][obj_idx]
+        obj_pos = obj["pos"]
+        obj_pos_noise = obj["pos_noise"]
+        obj_ori_noise = obj["ori_noise"]
+        x_ran = obj_pos[0] + random.uniform(-obj_pos_noise[0], obj_pos_noise[0])
+        y_ran = obj_pos[1] + random.uniform(-obj_pos_noise[1], obj_pos_noise[1])
+        ori_ran = random.uniform(-obj_ori_noise, obj_ori_noise)
+        z = 0.78806
+        pos = [x_ran, y_ran, z]
+        ori = [0.0, 0.0, ori_ran]
 
         logger = logging.getLogger(__name__)
-        logger.info(f"random OBJ_POS: {pos}, OBJ_ORI: {ori}")
-
+        logger.info(f"random object position: {pos}, object orientation: {ori}")
         return pos, ori
 
-    def _move_obj(self, pos, ori) -> None:
-        # pos = [0.5, 0.5, 0.78466]
-        # ori = [0.0, 0.0, 0.0]
+    def _get_random_goal_pos_ori(self, goals):
+        goal_idx = random.choice(goals)
+        goal = self._pos_conf["goal"][goal_idx]
+        goal_pos = goal["pos"]
+        goal_pos_noise = goal["pos_noise"]
+        goal_ori_noise = goal["ori_noise"]
+
+        x_ran = goal_pos[0] + random.uniform(-goal_pos_noise[0], goal_pos_noise[0])
+        y_ran = goal_pos[1] + random.uniform(-goal_pos_noise[1], goal_pos_noise[1])
+        ori_ran = random.uniform(-goal_ori_noise, goal_ori_noise)
+        z = 0.79019
+        pos = [x_ran, y_ran, z]
+        ori = [0.0, 0.0, ori_ran]
+
+        logger = logging.getLogger(__name__)
+        logger.info(f"random goal position: {pos}, goal orientation: {ori}")
+        return pos, ori
+
+
+    def _get_rule_object(self, index: int):
+        """
+        根据 index 找到对应 object
+        """
+        for rule in self._ep_conf["rules"]:
+            if rule["start"] <= index < rule["end"]:
+                return rule
+
+        return None
+
+    def _move_object(self, object,  pos, ori) -> None:
         from omni.isaac.core.utils.rotations import euler_angles_to_quat
         quat = euler_angles_to_quat(np.array(ori), degrees=True)
         logger.info(f"move_obj: {pos}, {ori}, {quat}")
-        self._object.set_world_pose(
+        object.set_world_pose(
                 position=np.array(pos),
                 orientation=quat)  # (w, x,y,z)
-        # tup, tuo = self._object.get_world_pose()
-        # logger.info(f"self._object.get_world_pose(): {tup}, {tuo}")
 
     def _get_random_arm_pose(self):
         low_limits = np.array([-0.872665, 0.0, -1.5708, -0.785398, -0.785398, -0.785398, 0.0, -0.038])
@@ -205,15 +243,27 @@ class IsaacPiper(Robot):
 
 
     def reset_env(self, ep: int) -> None:
+        """
+        Use it when recording dataset
+        Args:
+            ep:
+        Returns:
+
+        """
         self.world.reset()  # reset() must before move_obj() otherwise reset() reloads USD
-        # pos, ori = self._get_random_obj_pos_ori()
-        pos = self._obj_config[ep]["position"]
-        ori = self._obj_config[ep]["orientation"]
-        if pos is not None and ori is not None:
-            logger.info(f"reset env: object pos: {pos}, ori: {ori}")
-            self._move_obj(pos, ori)
+        rule = self._get_rule_object(ep)
+        obj_pos, obj_ori = self._get_random_obj_pos_ori(rule["object"])
+        goal_pos, goal_ori = self._get_random_goal_pos_ori(rule["goal"])
+        # pos = self._obj_config[ep]["position"]
+        # ori = self._obj_config[ep]["orientation"]
+        if obj_pos is not None and obj_ori is not None:
+            logger.info(f"reset env: object pos: {obj_pos}, ori: {obj_ori}")
+            self._move_object(self._object, obj_pos, obj_ori)
             # act = self._get_random_arm_pose()
             # self.send_action(act)     # does not work here if Isaac Sim listens to moveit2
+        if goal_pos is not None and goal_ori is not None:
+            logger.info(f"reset env: goal pos: {goal_pos}, ori: {goal_ori}")
+            self._move_object(self._goal, goal_pos, goal_ori)
         for cam in self.cameras.values():
             cam.warmup()
 

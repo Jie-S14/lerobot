@@ -342,7 +342,7 @@ def record_loop(
     no_action_count = 0
     # When it is reset env loop
     if dataset is None:
-        logging.info(f"dataset is None. Should be reset")
+        logging.info(f"Dataset is None. Now it is resetting the environment.")
         # pos, ori = get_random_pos_ori()
         robot.reset_env(ep=recorded_episodes)   # 1. random obj pos
 
@@ -557,7 +557,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             )
 
         with VideoEncodingManager(dataset):
-            recorded_episodes = 0
+            recorded_episodes = 30
 
             log_say("Reset the environment", cfg.play_sounds)
 
@@ -617,6 +617,11 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                     if robot.name == "unitree_g1":
                         robot.reset()
 
+                    if events["rerecord_episode"]:
+                        recal_recorded_episodes = recorded_episodes
+                    else:
+                        recal_recorded_episodes = recorded_episodes+1
+
                     record_loop(
                         robot=robot,
                         events=events,
@@ -628,7 +633,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                         control_time_s=cfg.dataset.reset_time_s,
                         single_task=cfg.dataset.single_task,
                         display_data=cfg.display_data,
-                        recorded_episodes=recorded_episodes+1,
+                        recorded_episodes=recal_recorded_episodes,
                     )
 
                 if events["rerecord_episode"]:

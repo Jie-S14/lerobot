@@ -13,6 +13,7 @@ class IsaacPiperConfig(RobotConfig):
     robot_prim_path: str = "/World/piper/base_link"
     # Path to object to interact with (e.g. a block to push)
     object_prim_path: str = "/World/red_block"
+    goal_prim_path: str = "/World/small_KLT"
     # Isaac Sim fps
     fps: int = 30
     # camera prims mapping name -> prim_path
@@ -23,6 +24,10 @@ class IsaacPiperConfig(RobotConfig):
     use_ros2_action_interface: bool = True
     # ROS2 topic to listen for joint commands (if use_ros2_action_interface)
     ros2_command_topic: str = "/isaac_joint_commands"
+
+    # configs for recording random positions and orientations
+    ep_conf_path: str = "config_episode_rule.json" # use Path(__file__).parent to read relative path
+    pos_conf_path: str = "config_obj_goal_pos.json"
 
     # Simulation management options (Robot can manage stepping if it created/owns the world)
     manage_simulation: bool = True      # if True, IsaacPiperRobot starts internal sim loop

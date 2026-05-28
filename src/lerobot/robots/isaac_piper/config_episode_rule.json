@@ -1,0 +1,40 @@
+{
+  "rules": [
+    {
+      "start": 0,
+      "end": 6,
+      "object": "1",
+      "goal": ["top", "right", "right_back"]
+    },
+    {
+      "start": 6,
+      "end": 12,
+      "object": "3",
+      "goal": ["top", "left_back", "right_back"]
+    },
+    {
+      "start": 12,
+      "end": 18,
+      "object": "5",
+      "goal": ["top", "left", "left_back"]
+    },
+    {
+      "start": 18,
+      "end": 24,
+      "object": "6",
+      "goal": ["right", "right_back", "left_back"]
+    },
+    {
+      "start": 24,
+      "end": 30,
+      "object": "8",
+      "goal": ["left", "left_back", "right_back"]
+    },
+    {
+      "start": 30,
+      "end": 36,
+      "object": "9",
+      "goal": ["right_back", "left_back","back"]
+    }
+  ]
+}

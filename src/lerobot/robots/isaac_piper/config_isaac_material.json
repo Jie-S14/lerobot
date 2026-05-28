@@ -1,0 +1,10 @@
+[
+  {
+    "table": "/World/Looks/white_grey_tile",
+    "floor": "/World/Looks/ParquetFloor_01"
+  },
+  {
+    "table": "/World/Looks/ParquetFloor_01",
+    "floor": "/World/Looks/blue_grey_tile"
+  }
+]
