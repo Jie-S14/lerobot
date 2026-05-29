@@ -25,6 +25,7 @@ from safetensors.torch import load_file, save_file
 
 from lerobot.datasets.utils import flatten_dict, unflatten_dict
 from lerobot.utils.constants import RNG_STATE
+from lerobot.utils.utils import get_cartesian_from_polar
 
 
 def serialize_python_rng_state() -> dict[str, torch.Tensor]:
@@ -177,6 +178,20 @@ def set_seed(seed, accelerator: Callable | None = None) -> None:
         from accelerate.utils import set_seed as _accelerate_set_seed
 
         _accelerate_set_seed(seed)
+
+def get_random_position(angle_min, angle_max, radius_min, radius_max, x0: float = 0.0, y0: float = 0.0):
+    # Angle in the sector
+    angle = random.uniform(angle_min, angle_max)
+    # Radius from the robot base link
+    radius = np.sqrt(random.uniform(radius_min **2, radius_max **2))
+    # Polar to cartesian coordinate system
+    x, y = get_cartesian_from_polar(angle, radius, x0, y0)
+    # Output
+    return x, y
+
+def get_random_orientation(ori_min, ori_max):
+    ori = random.uniform(ori_min, ori_max)
+    return ori
 
 
 @contextmanager

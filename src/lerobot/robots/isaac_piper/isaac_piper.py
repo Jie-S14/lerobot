@@ -11,12 +11,9 @@ from lerobot.cameras.utils import make_cameras_from_configs
 from lerobot.processor import RobotAction, RobotObservation
 from lerobot.robots.robot import Robot
 from .config_isaac_piper import IsaacPiperConfig
-
-# NOTE: Omniverse / Isaac imports are optional here; keep them lazy to avoid import errors
-# import omni.isaac.core etc. inside connect() when available.
-
-# Import IsaacCamera class so we can create cameras bound to the same world if provided.
 from lerobot.cameras.isaac.camera_isaac import IsaacCamera  # type: ignore
+from lerobot.utils.random_utils import get_random_position, get_random_orientation
+from lerobot.utils.utils import get_euclidean_distance
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +47,8 @@ class IsaacPiper(Robot):
         self._sim_stop_event: Optional[threading.Event] = None
 
         EP_CONF_PATH = Path(__file__).parent / self.config.ep_conf_path
-        POS_CONFIG_PATH = Path(__file__).parent / self.config.pos_conf_path
-        logger.info(f"Loading recording config from {EP_CONF_PATH} and {POS_CONFIG_PATH}:")
         with open(EP_CONF_PATH, "r", encoding="utf-8") as f:
             self._ep_conf = json.load(f)
-        with open(POS_CONFIG_PATH, "r", encoding="utf-8") as f:
-            self._pos_conf = json.load(f)
 
     @property
     def observation_features(self) -> dict:
@@ -251,19 +244,50 @@ class IsaacPiper(Robot):
 
         """
         self.world.reset()  # reset() must before move_obj() otherwise reset() reloads USD
-        rule = self._get_rule_object(ep)
-        obj_pos, obj_ori = self._get_random_obj_pos_ori(rule["object"])
-        goal_pos, goal_ori = self._get_random_goal_pos_ori(rule["goal"])
+        # rule = self._get_rule_object(ep)
+        # obj_pos, obj_ori = self._get_random_obj_pos_ori(rule["object"])
+        # goal_pos, goal_ori = self._get_random_goal_pos_ori(rule["goal"])
         # pos = self._obj_config[ep]["position"]
         # ori = self._obj_config[ep]["orientation"]
-        if obj_pos is not None and obj_ori is not None:
-            logger.info(f"reset env: object pos: {obj_pos}, ori: {obj_ori}")
-            self._move_object(self._object, obj_pos, obj_ori)
-            # act = self._get_random_arm_pose()
-            # self.send_action(act)     # does not work here if Isaac Sim listens to moveit2
-        if goal_pos is not None and goal_ori is not None:
-            logger.info(f"reset env: goal pos: {goal_pos}, ori: {goal_ori}")
-            self._move_object(self._goal, goal_pos, goal_ori)
+        distance_flag = False
+        while not distance_flag:
+            obj_pos_x, obj_pos_y = get_random_position(self._ep_conf["limits"]["object"]["angle"][0],
+                                                     self._ep_conf["limits"]["object"]["angle"][1],
+                                                     self._ep_conf["limits"]["object"]["radius"][0],
+                                                     self._ep_conf["limits"]["object"]["radius"][1],
+                                                     self._ep_conf["limits"]["origin"][0],
+                                                     self._ep_conf["limits"]["origin"][1])
+            goal_pos_x, goal_pos_y = get_random_position(self._ep_conf["limits"]["goal"]["angle"][0],
+                                                         self._ep_conf["limits"]["goal"]["angle"][1],
+                                                         self._ep_conf["limits"]["goal"]["radius"][0],
+                                                         self._ep_conf["limits"]["goal"]["radius"][1],
+                                                         self._ep_conf["limits"]["origin"][0],
+                                                         self._ep_conf["limits"]["origin"][1])
+            distance = get_euclidean_distance(obj_pos_x, obj_pos_y,
+                                          goal_pos_x, goal_pos_y)
+            if distance < self._ep_conf["limits"]["min_distance"]:
+                distance_flag = False
+                logger.info(f"reset_env(): Distance between object and goal: {distance}, less than the minimum distance. Re-generate.")
+                continue
+            else:
+                distance_flag = True
+                break
+
+        obj_ori = get_random_orientation(-self._ep_conf["limits"]["object"]["orientation"],
+                                         self._ep_conf["limits"]["object"]["orientation"])
+        goal_ori = get_random_orientation(-self._ep_conf["limits"]["goal"]["orientation"],
+                                          self._ep_conf["limits"]["goal"]["orientation"])
+
+        logger.info(f"reset_env(): object pos: ({obj_pos_x}, {obj_pos_y}), ori: {obj_ori}")
+        self._move_object(self._object,
+                          [obj_pos_x, obj_pos_y, self._ep_conf["limits"]["object"]["z_axis"]],
+                          [0, 0, obj_ori])
+
+        logger.info(f"reset_env(): goal pos: ({goal_pos_x}, {goal_pos_y}), ori: {goal_ori}")
+        self._move_object(self._goal,
+                          [goal_pos_x, goal_pos_y, self._ep_conf["limits"]["goal"]["z_axis"]],
+                          [0, 0, goal_ori])
+
         for cam in self.cameras.values():
             cam.warmup()
 

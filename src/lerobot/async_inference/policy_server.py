@@ -261,7 +261,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
                             obs_raw = obs.get_observation()
                             # 尝试从 observation 中读取原始图像尺寸（fallback 会使用 layout 中的 orig_hw 或 224x224）
                             target_hw = None
-                            target_hw = (512, 512)
+                            target_hw = (480, 640)
                             # for img_key in (self.policy_image_features or []):
                             #     if isinstance(obs_raw, dict) and img_key in obs_raw:
                             #         img_data = obs_raw[img_key]

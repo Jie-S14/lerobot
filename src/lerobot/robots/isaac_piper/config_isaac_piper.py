@@ -27,7 +27,6 @@ class IsaacPiperConfig(RobotConfig):
 
     # configs for recording random positions and orientations
     ep_conf_path: str = "config_episode_rule.json" # use Path(__file__).parent to read relative path
-    pos_conf_path: str = "config_obj_goal_pos.json"
 
     # Simulation management options (Robot can manage stepping if it created/owns the world)
     manage_simulation: bool = True      # if True, IsaacPiperRobot starts internal sim loop

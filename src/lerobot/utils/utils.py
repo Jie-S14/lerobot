@@ -283,6 +283,15 @@ def get_elapsed_time_in_days_hours_minutes_seconds(elapsed_time_s: float):
     seconds = elapsed_time_s % 60
     return days, hours, minutes, seconds
 
+def get_cartesian_from_polar(angle, radius, x0: float = 0.0, y0: float = 0.0):
+    x = x0 + radius * np.cos(angle)
+    y = y0 + radius * np.sin(angle)
+    return x, y
+
+def get_euclidean_distance(x1: float, y1: float, x2: float, y2: float) -> float:
+    distance = np.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2)
+    return distance
+
 
 class SuppressProgressBars:
     """

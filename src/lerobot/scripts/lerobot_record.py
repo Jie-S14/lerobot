@@ -143,6 +143,7 @@ from lerobot.utils.control_utils import (
     sanity_check_dataset_robot_compatibility,
 )
 from lerobot.utils.import_utils import register_third_party_plugins
+from lerobot.utils.random_utils import set_seed
 from lerobot.utils.robot_utils import precise_sleep
 from lerobot.utils.utils import (
     get_safe_torch_device,
@@ -229,6 +230,8 @@ class RecordConfig:
     play_sounds: bool = False
     # Resume recording on an existing dataset.
     resume: bool = False
+    # Seed for shuffle object positions
+    seed: int = 42
 
     def __post_init__(self):
         # HACK: We parse again the cli args here to get the pretrained path if there was one.
@@ -451,6 +454,8 @@ def record_loop(
 def record(cfg: RecordConfig) -> LeRobotDataset:
     init_logging()
     logging.info(pformat(asdict(cfg)))
+    if cfg.seed is not None:
+        set_seed(cfg.seed)  # for isaac piper robot to auto-generate pos
     if cfg.display_data:
         init_rerun(session_name="recording", ip=cfg.display_ip, port=cfg.display_port)
     display_compressed_images = (
