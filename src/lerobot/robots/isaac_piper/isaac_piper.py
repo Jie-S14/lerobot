@@ -235,20 +235,18 @@ class IsaacPiper(Robot):
         return ret
 
 
-    def reset_env(self, ep: int) -> None:
+    def reset_env(self, ep: int, seed: int) -> None:
         """
         Use it when recording dataset
         Args:
-            ep:
+            seed: master seed
+            ep: offset seed
         Returns:
 
         """
         self.world.reset()  # reset() must before move_obj() otherwise reset() reloads USD
-        # rule = self._get_rule_object(ep)
-        # obj_pos, obj_ori = self._get_random_obj_pos_ori(rule["object"])
-        # goal_pos, goal_ori = self._get_random_goal_pos_ori(rule["goal"])
-        # pos = self._obj_config[ep]["position"]
-        # ori = self._obj_config[ep]["orientation"]
+        # random seed = master seed + no.episode, make dataset extendable
+        random.seed(ep+seed)
         distance_flag = False
         while not distance_flag:
             obj_pos_x, obj_pos_y = get_random_position(self._ep_conf["limits"]["object"]["angle"][0],
@@ -278,12 +276,12 @@ class IsaacPiper(Robot):
         goal_ori = get_random_orientation(-self._ep_conf["limits"]["goal"]["orientation"],
                                           self._ep_conf["limits"]["goal"]["orientation"])
 
-        logger.info(f"reset_env(): object pos: ({obj_pos_x}, {obj_pos_y}), ori: {obj_ori}")
+        logger.info(f"reset_env(): object pos: ({obj_pos_x}, {obj_pos_y}), angle: {obj_angle}, ori: {obj_ori}")
         self._move_object(self._object,
                           [obj_pos_x, obj_pos_y, self._ep_conf["limits"]["object"]["z_axis"]],
                           [0, 0, obj_ori])
 
-        logger.info(f"reset_env(): goal pos: ({goal_pos_x}, {goal_pos_y}), ori: {goal_ori}")
+        logger.info(f"reset_env(): goal pos: ({goal_pos_x}, {goal_pos_y}), angle: {goal_angle}, ori: {goal_ori}")
         self._move_object(self._goal,
                           [goal_pos_x, goal_pos_y, self._ep_conf["limits"]["goal"]["z_axis"]],
                           [0, 0, goal_ori])

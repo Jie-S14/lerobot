@@ -3,14 +3,14 @@
     "origin": [0.0, 0.0],
     "min_distance": 0.13,
     "object": {
-      "radius": [0.18, 0.45],
-      "angle": [30, 150],
+      "radius": [0.18, 0.40],
+      "angle": [45, 135],
       "orientation": 45,
       "z_axis": 0.78806
     },
     "goal": {
-      "radius": [0.18, 0.45],
-      "angle": [30, 150],
+      "radius": [0.18, 0.40],
+      "angle": [45, 135],
       "orientation": 45,
       "z_axis": 0.79019
     }

@@ -306,6 +306,7 @@ def record_loop(
     display_data: bool = False,
     display_compressed_images: bool = False,
     recorded_episodes: int | None = None,
+    seed: int = 42,
 ):
     logging.info("Starting recording loop")
     if dataset is not None and dataset.fps != fps:
@@ -347,7 +348,7 @@ def record_loop(
     if dataset is None:
         logging.info(f"Dataset is None. Now it is resetting the environment.")
         # pos, ori = get_random_pos_ori()
-        robot.reset_env(ep=recorded_episodes)   # 1. random obj pos
+        robot.reset_env(ep=recorded_episodes, seed=seed)   # 1. random obj pos
 
     timestamp = 0
     start_episode_t = time.perf_counter()
@@ -562,7 +563,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             )
 
         with VideoEncodingManager(dataset):
-            recorded_episodes = 30
+            recorded_episodes = 0
 
             log_say("Reset the environment", cfg.play_sounds)
 
@@ -582,6 +583,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                 single_task=cfg.dataset.single_task,
                 display_data=cfg.display_data,
                 recorded_episodes=recorded_episodes,
+                seed=cfg.seed,
             )
 
             while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
@@ -639,6 +641,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                         single_task=cfg.dataset.single_task,
                         display_data=cfg.display_data,
                         recorded_episodes=recal_recorded_episodes,
+                        seed=cfg.seed,
                     )
 
                 if events["rerecord_episode"]:

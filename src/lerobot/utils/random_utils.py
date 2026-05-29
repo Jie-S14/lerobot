@@ -181,16 +181,16 @@ def set_seed(seed, accelerator: Callable | None = None) -> None:
 
 def get_random_position(angle_min, angle_max, radius_min, radius_max, x0: float = 0.0, y0: float = 0.0):
     # Angle in the sector
-    angle = random.uniform(angle_min, angle_max)
+    radian = random.uniform(np.radians(angle_min), np.radians(angle_max))
     # Radius from the robot base link
     radius = np.sqrt(random.uniform(radius_min **2, radius_max **2))
     # Polar to cartesian coordinate system
-    x, y = get_cartesian_from_polar(angle, radius, x0, y0)
+    x, y = get_cartesian_from_polar(radian, radius, x0, y0)
     # Output
     return x, y
 
-def get_random_orientation(ori_min, ori_max):
-    ori = random.uniform(ori_min, ori_max)
+def get_random_orientation(angle_min, angle_max):
+    ori = random.uniform(angle_min, angle_max)
     return ori
 
 
