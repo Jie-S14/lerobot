@@ -3,6 +3,7 @@ import logging
 from pathlib import Path
 import random
 import threading
+import time
 from typing import Any, Optional
 
 import numpy as np
@@ -45,6 +46,9 @@ class IsaacPiper(Robot):
         self._ros2_publisher = None
         self._sim_thread: Optional[threading.Thread] = None
         self._sim_stop_event: Optional[threading.Event] = None
+        # to statistic object and goal positions for dataset analysis, key: episode index, value: (object pos, goal pos)
+        self._obj_pos = { "object": {} }
+        self._goal_pos = { "goal": {} }
 
         EP_CONF_PATH = Path(__file__).parent / self.config.ep_conf_path
         with open(EP_CONF_PATH, "r", encoding="utf-8") as f:
@@ -276,15 +280,17 @@ class IsaacPiper(Robot):
         goal_ori = get_random_orientation(-self._ep_conf["limits"]["goal"]["orientation"],
                                           self._ep_conf["limits"]["goal"]["orientation"])
 
-        logger.info(f"reset_env(): object pos: ({obj_pos_x}, {obj_pos_y}), angle: {obj_angle}, ori: {obj_ori}")
+        logger.info(f"reset_env(): object pos: ({obj_pos_x}, {obj_pos_y}), ori: {obj_ori}")
         self._move_object(self._object,
                           [obj_pos_x, obj_pos_y, self._ep_conf["limits"]["object"]["z_axis"]],
                           [0, 0, obj_ori])
+        # self._obj_pos["object"][f"{ep}"] = { "position": [obj_pos_x, obj_pos_y], "orientation": obj_ori }
 
-        logger.info(f"reset_env(): goal pos: ({goal_pos_x}, {goal_pos_y}), angle: {goal_angle}, ori: {goal_ori}")
+        logger.info(f"reset_env(): goal pos: ({goal_pos_x}, {goal_pos_y}), ori: {goal_ori}")
         self._move_object(self._goal,
                           [goal_pos_x, goal_pos_y, self._ep_conf["limits"]["goal"]["z_axis"]],
                           [0, 0, goal_ori])
+        # self._goal_pos["goal"][f"{ep}"] = { "position": [goal_pos_x, goal_pos_y], "orientation": goal_ori }
 
         for cam in self.cameras.values():
             cam.warmup()
@@ -320,6 +326,9 @@ class IsaacPiper(Robot):
                     cam.disconnect()
             except Exception:
                 pass
+        ts = time.time_ns()
+        # json.dump(self._obj_pos, open(f"/home/shenjie/Documents/object_positions_{ts}.json", "w"), indent=4)
+        # json.dump(self._goal_pos, open(f"/home/shenjie/Documents/goal_positions_{ts}.json", "w"), indent=4)
         # self.world.stop()
         # self._app.close()
         # TODO: shutdown SimulationApp if created (self._app) and cleanup stage if owned
