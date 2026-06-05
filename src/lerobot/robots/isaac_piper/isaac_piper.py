@@ -259,12 +259,21 @@ class IsaacPiper(Robot):
                                                      self._ep_conf["limits"]["object"]["radius"][1],
                                                      self._ep_conf["limits"]["origin"][0],
                                                      self._ep_conf["limits"]["origin"][1])
-            goal_pos_x, goal_pos_y = get_random_position(self._ep_conf["limits"]["goal"]["angle"][0],
-                                                         self._ep_conf["limits"]["goal"]["angle"][1],
-                                                         self._ep_conf["limits"]["goal"]["radius"][0],
-                                                         self._ep_conf["limits"]["goal"]["radius"][1],
-                                                         self._ep_conf["limits"]["origin"][0],
-                                                         self._ep_conf["limits"]["origin"][1])
+            # if random.uniform(0, 1) < 0.5:
+                # 50% chance to spawn goal on the left side of the robot, 50% on the right side
+            goal_pos_x, goal_pos_y = get_random_position(self._ep_conf["limits"]["goal"]["angle1"][0],
+                                                        self._ep_conf["limits"]["goal"]["angle1"][1],
+                                                        self._ep_conf["limits"]["goal"]["radius"][0],
+                                                        self._ep_conf["limits"]["goal"]["radius"][1],
+                                                        self._ep_conf["limits"]["origin"][0],
+                                                        self._ep_conf["limits"]["origin"][1])
+            # else:
+            #     goal_pos_x, goal_pos_y = get_random_position(self._ep_conf["limits"]["goal"]["angle2"][0],
+            #                                                 self._ep_conf["limits"]["goal"]["angle2"][1],
+            #                                                 self._ep_conf["limits"]["goal"]["radius"][0],
+            #                                                 self._ep_conf["limits"]["goal"]["radius"][1],
+            #                                                 self._ep_conf["limits"]["origin"][0],
+            #                                                 self._ep_conf["limits"]["origin"][1])
             distance = get_euclidean_distance(obj_pos_x, obj_pos_y,
                                           goal_pos_x, goal_pos_y)
             if distance < self._ep_conf["limits"]["min_distance"]:
@@ -275,22 +284,22 @@ class IsaacPiper(Robot):
                 distance_flag = True
                 break
 
-        obj_ori = get_random_orientation(-self._ep_conf["limits"]["object"]["orientation"],
-                                         self._ep_conf["limits"]["object"]["orientation"])
-        goal_ori = get_random_orientation(-self._ep_conf["limits"]["goal"]["orientation"],
-                                          self._ep_conf["limits"]["goal"]["orientation"])
+        obj_ori = get_random_orientation(self._ep_conf["limits"]["object"]["orientation"][0],
+                                         self._ep_conf["limits"]["object"]["orientation"][1])
+        goal_ori = get_random_orientation(self._ep_conf["limits"]["goal"]["orientation"][0],
+                                          self._ep_conf["limits"]["goal"]["orientation"][1])
 
         logger.info(f"reset_env(): object pos: ({obj_pos_x}, {obj_pos_y}), ori: {obj_ori}")
         self._move_object(self._object,
                           [obj_pos_x, obj_pos_y, self._ep_conf["limits"]["object"]["z_axis"]],
                           [0, 0, obj_ori])
-        # self._obj_pos["object"][f"{ep}"] = { "position": [obj_pos_x, obj_pos_y], "orientation": obj_ori }
+        self._obj_pos["object"][f"{ep}"] = { "position": [obj_pos_x, obj_pos_y], "orientation": obj_ori }
 
         logger.info(f"reset_env(): goal pos: ({goal_pos_x}, {goal_pos_y}), ori: {goal_ori}")
         self._move_object(self._goal,
                           [goal_pos_x, goal_pos_y, self._ep_conf["limits"]["goal"]["z_axis"]],
                           [0, 0, goal_ori])
-        # self._goal_pos["goal"][f"{ep}"] = { "position": [goal_pos_x, goal_pos_y], "orientation": goal_ori }
+        self._goal_pos["goal"][f"{ep}"] = { "position": [goal_pos_x, goal_pos_y], "orientation": goal_ori }
 
         for cam in self.cameras.values():
             cam.warmup()
@@ -327,8 +336,8 @@ class IsaacPiper(Robot):
             except Exception:
                 pass
         ts = time.time_ns()
-        # json.dump(self._obj_pos, open(f"/home/shenjie/Documents/object_positions_{ts}.json", "w"), indent=4)
-        # json.dump(self._goal_pos, open(f"/home/shenjie/Documents/goal_positions_{ts}.json", "w"), indent=4)
+        json.dump(self._obj_pos, open(f"/home/shenjie/Documents/object_positions_{ts}.json", "w"), indent=4)
+        json.dump(self._goal_pos, open(f"/home/shenjie/Documents/goal_positions_{ts}.json", "w"), indent=4)
         # self.world.stop()
         # self._app.close()
         # TODO: shutdown SimulationApp if created (self._app) and cleanup stage if owned
