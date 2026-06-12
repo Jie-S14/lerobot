@@ -180,6 +180,43 @@ def init_keyboard_listener():
     return listener, events
 
 
+def init_eval_keyboard_listener():
+    """
+    Init a small non-blocking keyboard listener tailored for eval:
+    - Keys: '1' -> mark success, '0' -> mark fail, 'q' -> quit.
+    - Prefer pynput keyboard listener (same behavior as record).
+    Returns: (listener_obj, stop_event_or_None, events_dict)
+    """
+    events = {"succ": False, "fail": False, "quit": False}
+
+    # Try pynput first (graphical environments)
+    from pynput import keyboard  # type: ignore
+
+    def _on_press(key):
+        try:
+            if key == keyboard.Key.right:
+                print("Right arrow key pressed. Marking episode as SUCCESS...")
+                events["succ"] = True
+                events
+            elif key == keyboard.Key.left:
+                print("Left arrow key pressed. Marking episode as FAIL...")
+                events["fail"] = True
+                events["succ"] = False  # ensure only one of succ/fail is True
+            elif key == keyboard.Key.esc:
+                print("Escape key pressed. Quitting evaluation...")
+                events["quit"] = True
+                events["succ"] = False
+                events["fail"] = False
+
+        except Exception:
+            # ignore non-printable keys or unexpected errors
+            pass
+
+    listener = keyboard.Listener(on_press=_on_press)
+    listener.start()
+    return listener, None, events
+
+
 def sanity_check_dataset_name(repo_id, policy_cfg):
     """
     Validates the dataset repository name against the presence of a policy configuration.

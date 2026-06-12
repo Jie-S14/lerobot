@@ -93,7 +93,7 @@ class RobotClient:
         # Store configuration
         self.config = config
         self.robot = make_robot_from_config(config.robot)
-        self.robot.connect()
+        # self.robot.connect()
 
         lerobot_features = map_robot_keys_to_lerobot_features(self.robot)
 
@@ -165,6 +165,8 @@ class RobotClient:
 
             self.shutdown_event.clear()
 
+            self.robot.connect()
+
             return True
 
         except grpc.RpcError as e:
@@ -172,14 +174,27 @@ class RobotClient:
             return False
 
     def stop(self):
-        """Stop the robot client"""
+        """Stop the robot client (signal threads and disconnect robot). Do NOT close gRPC channel here."""
+        # signal threads to stop
         self.shutdown_event.set()
 
-        self.robot.disconnect()
-        self.logger.debug("Robot disconnected")
+        # try to disconnect robot (safe to call multiple times)
+        try:
+            self.robot.disconnect()
+            self.logger.debug("Robot disconnected")
+        except Exception as e:
+            self.logger.debug(f"Error while disconnecting robot in stop(): {e}")
 
-        self.channel.close()
-        self.logger.debug("Client stopped, channel closed")
+        # NOTE: do not close channel here to allow in-flight RPCs to finish.
+        # client.close_channel() will explicitly close the channel when caller has joined threads.
+
+    def close_channel(self):
+        """Close the underlying gRPC channel. Call this after client threads have exited."""
+        try:
+            self.channel.close()
+            self.logger.debug("gRPC channel closed")
+        except Exception as e:
+            self.logger.debug(f"Error closing gRPC channel: {e}")
 
     def send_observation(
         self,

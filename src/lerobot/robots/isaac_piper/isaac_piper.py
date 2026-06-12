@@ -46,13 +46,13 @@ class IsaacPiper(Robot):
         self._ros2_publisher = None
         self._sim_thread: Optional[threading.Thread] = None
         self._sim_stop_event: Optional[threading.Event] = None
-        # to statistic object and goal positions for dataset analysis, key: episode index, value: (object pos, goal pos)
-        self._obj_pos = { "object": {} }
-        self._goal_pos = { "goal": {} }
+        
+        with open(config.obj_pose_path, "r", encoding="utf-8") as f:
+            self._obj_poses = json.load(f)["object"]
 
-        EP_CONF_PATH = Path(__file__).parent / self.config.ep_conf_path
-        with open(EP_CONF_PATH, "r", encoding="utf-8") as f:
-            self._ep_conf = json.load(f)
+        with open(config.goal_pose_path, "r", encoding="utf-8") as f:
+            self._goal_poses = json.load(f)["goal"]
+
 
     @property
     def observation_features(self) -> dict:
@@ -172,57 +172,6 @@ class IsaacPiper(Robot):
                 # obs[f"images.{name}_ts"] = None
         return obs
 
-
-    def _get_random_obj_pos_ori(self, obj_idx):
-        """
-        Returns:
-            object positions (x, y, z) and orientation
-        """
-        # check conf files to see data structure
-        obj = self._pos_conf["object"][obj_idx]
-        obj_pos = obj["pos"]
-        obj_pos_noise = obj["pos_noise"]
-        obj_ori_noise = obj["ori_noise"]
-        x_ran = obj_pos[0] + random.uniform(-obj_pos_noise[0], obj_pos_noise[0])
-        y_ran = obj_pos[1] + random.uniform(-obj_pos_noise[1], obj_pos_noise[1])
-        ori_ran = random.uniform(-obj_ori_noise, obj_ori_noise)
-        z = 0.78806
-        pos = [x_ran, y_ran, z]
-        ori = [0.0, 0.0, ori_ran]
-
-        logger = logging.getLogger(__name__)
-        logger.info(f"random object position: {pos}, object orientation: {ori}")
-        return pos, ori
-
-    def _get_random_goal_pos_ori(self, goals):
-        goal_idx = random.choice(goals)
-        goal = self._pos_conf["goal"][goal_idx]
-        goal_pos = goal["pos"]
-        goal_pos_noise = goal["pos_noise"]
-        goal_ori_noise = goal["ori_noise"]
-
-        x_ran = goal_pos[0] + random.uniform(-goal_pos_noise[0], goal_pos_noise[0])
-        y_ran = goal_pos[1] + random.uniform(-goal_pos_noise[1], goal_pos_noise[1])
-        ori_ran = random.uniform(-goal_ori_noise, goal_ori_noise)
-        z = 0.79019
-        pos = [x_ran, y_ran, z]
-        ori = [0.0, 0.0, ori_ran]
-
-        logger = logging.getLogger(__name__)
-        logger.info(f"random goal position: {pos}, goal orientation: {ori}")
-        return pos, ori
-
-
-    def _get_rule_object(self, index: int):
-        """
-        根据 index 找到对应 object
-        """
-        for rule in self._ep_conf["rules"]:
-            if rule["start"] <= index < rule["end"]:
-                return rule
-
-        return None
-
     def _move_object(self, object,  pos, ori) -> None:
         from omni.isaac.core.utils.rotations import euler_angles_to_quat
         quat = euler_angles_to_quat(np.array(ori), degrees=True)
@@ -231,17 +180,9 @@ class IsaacPiper(Robot):
                 position=np.array(pos),
                 orientation=quat)  # (w, x,y,z)
 
-    def _get_random_arm_pose(self):
-        low_limits = np.array([-0.872665, 0.0, -1.5708, -0.785398, -0.785398, -0.785398, 0.0, -0.038])
-        high_limits = np.array([0.872665, 1.8326, 0.0, 0.785398, 0.785398, 0.785398, 0.038, 0.0])
-        random_joints = np.random.uniform(low=low_limits, high=high_limits)
-        ret = dict(zip(self.joint_names, random_joints))
-        return ret
-
-
     def reset_env(self, ep: int, seed: int) -> None:
         """
-        Use it when recording dataset
+        Use it when recording/evaluating dataset
         Args:
             seed: master seed
             ep: offset seed
@@ -249,57 +190,14 @@ class IsaacPiper(Robot):
 
         """
         self.world.reset()  # reset() must before move_obj() otherwise reset() reloads USD
-        # random seed = master seed + no.episode, make dataset extendable
-        random.seed(ep+seed)
-        distance_flag = False
-        while not distance_flag:
-            obj_pos_x, obj_pos_y = get_random_position(self._ep_conf["limits"]["object"]["angle"][0],
-                                                     self._ep_conf["limits"]["object"]["angle"][1],
-                                                     self._ep_conf["limits"]["object"]["radius"][0],
-                                                     self._ep_conf["limits"]["object"]["radius"][1],
-                                                     self._ep_conf["limits"]["origin"][0],
-                                                     self._ep_conf["limits"]["origin"][1])
-            # if random.uniform(0, 1) < 0.5:
-                # 50% chance to spawn goal on the left side of the robot, 50% on the right side
-            goal_pos_x, goal_pos_y = get_random_position(self._ep_conf["limits"]["goal"]["angle1"][0],
-                                                        self._ep_conf["limits"]["goal"]["angle1"][1],
-                                                        self._ep_conf["limits"]["goal"]["radius"][0],
-                                                        self._ep_conf["limits"]["goal"]["radius"][1],
-                                                        self._ep_conf["limits"]["origin"][0],
-                                                        self._ep_conf["limits"]["origin"][1])
-            # else:
-            #     goal_pos_x, goal_pos_y = get_random_position(self._ep_conf["limits"]["goal"]["angle2"][0],
-            #                                                 self._ep_conf["limits"]["goal"]["angle2"][1],
-            #                                                 self._ep_conf["limits"]["goal"]["radius"][0],
-            #                                                 self._ep_conf["limits"]["goal"]["radius"][1],
-            #                                                 self._ep_conf["limits"]["origin"][0],
-            #                                                 self._ep_conf["limits"]["origin"][1])
-            distance = get_euclidean_distance(obj_pos_x, obj_pos_y,
-                                          goal_pos_x, goal_pos_y)
-            if distance < self._ep_conf["limits"]["min_distance"]:
-                distance_flag = False
-                logger.info(f"reset_env(): Distance between object and goal: {distance}, less than the minimum distance. Re-generate.")
-                continue
-            else:
-                distance_flag = True
-                break
-
-        obj_ori = get_random_orientation(self._ep_conf["limits"]["object"]["orientation"][0],
-                                         self._ep_conf["limits"]["object"]["orientation"][1])
-        goal_ori = get_random_orientation(self._ep_conf["limits"]["goal"]["orientation"][0],
-                                          self._ep_conf["limits"]["goal"]["orientation"][1])
-
-        logger.info(f"reset_env(): object pos: ({obj_pos_x}, {obj_pos_y}), ori: {obj_ori}")
+        
         self._move_object(self._object,
-                          [obj_pos_x, obj_pos_y, self._ep_conf["limits"]["object"]["z_axis"]],
-                          [0, 0, obj_ori])
-        self._obj_pos["object"][f"{ep}"] = { "position": [obj_pos_x, obj_pos_y], "orientation": obj_ori }
+                          self._obj_poses[f"{ep}"]["position"],
+                          [0, 0, self._obj_poses[f"{ep}"]["orientation"]])
 
-        logger.info(f"reset_env(): goal pos: ({goal_pos_x}, {goal_pos_y}), ori: {goal_ori}")
         self._move_object(self._goal,
-                          [goal_pos_x, goal_pos_y, self._ep_conf["limits"]["goal"]["z_axis"]],
-                          [0, 0, goal_ori])
-        self._goal_pos["goal"][f"{ep}"] = { "position": [goal_pos_x, goal_pos_y], "orientation": goal_ori }
+                          self._goal_poses[f"{ep}"]["position"],
+                          [0, 0, self._goal_poses[f"{ep}"]["orientation"]])
 
         for cam in self.cameras.values():
             cam.warmup()
@@ -335,10 +233,7 @@ class IsaacPiper(Robot):
                     cam.disconnect()
             except Exception:
                 pass
-        ts = time.time_ns()
-        json.dump(self._obj_pos, open(f"/home/shenjie/Documents/object_positions_{ts}.json", "w"), indent=4)
-        json.dump(self._goal_pos, open(f"/home/shenjie/Documents/goal_positions_{ts}.json", "w"), indent=4)
-        # self.world.stop()
+        self.world.stop()
         # self._app.close()
         # TODO: shutdown SimulationApp if created (self._app) and cleanup stage if owned
         self._connected = False

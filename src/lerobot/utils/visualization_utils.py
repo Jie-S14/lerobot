@@ -23,6 +23,9 @@ from lerobot.processor import RobotAction, RobotObservation
 
 from .constants import ACTION, ACTION_PREFIX, OBS_PREFIX, OBS_STR
 
+# track whether we initialized/started rerun in this process
+_rerun_started = False
+_rerun_spawned = False
 
 def init_rerun(
     session_name: str = "lerobot_control_loop", ip: str | None = None, port: int | None = None
@@ -35,14 +38,69 @@ def init_rerun(
         ip: Optional IP for connecting to a Rerun server.
         port: Optional port for connecting to a Rerun server.
     """
+    global _rerun_started, _rerun_spawned
     batch_size = os.getenv("RERUN_FLUSH_NUM_BYTES", "8000")
     os.environ["RERUN_FLUSH_NUM_BYTES"] = batch_size
     rr.init(session_name)
     memory_limit = os.getenv("LEROBOT_RERUN_MEMORY_LIMIT", "10%")
     if ip and port:
         rr.connect_grpc(url=f"rerun+http://{ip}:{port}/proxy")
+        _rerun_started = True
+        _rerun_spawned = False
     else:
-        rr.spawn(memory_limit=memory_limit)
+        rr.spawn(memory_limit=memory_limit, detach_process=False)
+        _rerun_started = True
+        _rerun_spawned = True
+
+def stop_rerun(timeout_s: float = 2.0) -> None:
+    """
+    Try to gracefully stop / flush the rerun SDK started by init_rerun.
+    This function is defensive: it attempts common teardown APIs (flush, shutdown, disconnect, close)
+    and ignores exceptions so teardown never raises during program shutdown.
+    """
+    global _rerun_started, _rerun_spawned
+    if not _rerun_started:
+        return
+
+    try:
+        rr.disconnect()
+        rr.rerun_shutdown()
+        # try to flush any pending data first
+        # if hasattr(rr, "flush"):
+        #     try:
+        #         rr.flush()
+        #     except Exception:
+        #         # some rr versions may not implement flush or may raise internally
+        #         pass
+
+        # # prefer public shutdown if available
+        # if hasattr(rr, "shutdown"):
+        #     try:
+        #         rr.shutdown()
+        #     except Exception:
+        #         pass
+        # # fallback disconnect / close variants found in different rr versions
+        # elif hasattr(rr, "disconnect_grpc"):
+        #     try:
+        #         rr.disconnect_grpc()
+        #     except Exception:
+        #         pass
+        # elif hasattr(rr, "disconnect"):
+        #     try:
+        #         rr.disconnect()
+        #     except Exception:
+        #         pass
+        # elif hasattr(rr, "close"):
+        #     try:
+        #         rr.close()
+        #     except Exception:
+        #         pass
+    except Exception as e:
+        # be maximally defensive: swallow all errors during teardown
+        pass
+    finally:
+        _rerun_started = False
+        _rerun_spawned = False
 
 
 def _is_scalar(x):

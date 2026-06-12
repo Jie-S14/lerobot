@@ -179,41 +179,50 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         client_id = context.peer()
         self.logger.debug(f"Receiving observations from {client_id}")
 
-        receive_time = time.time()  # comparing timestamps so need time.time()
-        start_deserialize = time.perf_counter()
-        received_bytes = receive_bytes_in_chunks(
-            request_iterator, None, self.shutdown_event, self.logger.name
-        )  # blocking call while looping over request_iterator
-        timed_observation = pickle.loads(received_bytes)  # nosec
-        deserialize_time = time.perf_counter() - start_deserialize
+        try:
+            receive_time = time.time()  # comparing timestamps so need time.time()
+            start_deserialize = time.perf_counter()
+            received_bytes = receive_bytes_in_chunks(
+                request_iterator, None, self.shutdown_event, self.logger.name
+            )  # blocking call while looping over request_iterator
+            timed_observation = pickle.loads(received_bytes)  # nosec
+            deserialize_time = time.perf_counter() - start_deserialize
 
-        self.logger.debug(f"Received observation #{timed_observation.get_timestep()}")
+            self.logger.debug(f"Received observation #{timed_observation.get_timestep()}")
 
-        obs_timestep = timed_observation.get_timestep()
-        obs_timestamp = timed_observation.get_timestamp()
+            obs_timestep = timed_observation.get_timestep()
+            obs_timestamp = timed_observation.get_timestamp()
 
-        # Calculate FPS metrics
-        fps_metrics = self.fps_tracker.calculate_fps_metrics(obs_timestamp)
+            # Calculate FPS metrics
+            fps_metrics = self.fps_tracker.calculate_fps_metrics(obs_timestamp)
 
-        self.logger.debug(
-            f"Received observation #{obs_timestep} | "
-            f"Avg FPS: {fps_metrics['avg_fps']:.2f} | "  # fps at which observations are received from client
-            f"Target: {fps_metrics['target_fps']:.2f} | "
-            f"One-way latency: {(receive_time - obs_timestamp) * 1000:.2f}ms"
-        )
+            self.logger.debug(
+                f"Received observation #{obs_timestep} | "
+                f"Avg FPS: {fps_metrics['avg_fps']:.2f} | "  # fps at which observations are received from client
+                f"Target: {fps_metrics['target_fps']:.2f} | "
+                f"One-way latency: {(receive_time - obs_timestamp) * 1000:.2f}ms"
+            )
 
-        self.logger.debug(
-            f"Server timestamp: {receive_time:.6f} | "
-            f"Client timestamp: {obs_timestamp:.6f} | "
-            f"Deserialization time: {deserialize_time:.6f}s"
-        )
+            self.logger.debug(
+                f"Server timestamp: {receive_time:.6f} | "
+                f"Client timestamp: {obs_timestamp:.6f} | "
+                f"Deserialization time: {deserialize_time:.6f}s"
+            )
 
-        if not self._enqueue_observation(
-            timed_observation  # wrapping a RawObservation
-        ):
-            self.logger.debug(f"Observation #{obs_timestep} has been filtered out") # because it is not a must_go
+            if not self._enqueue_observation(
+                timed_observation  # wrapping a RawObservation
+            ):
+                self.logger.debug(f"Observation #{obs_timestep} has been filtered out") # because it is not a must_go
 
-        return services_pb2.Empty()
+            return services_pb2.Empty()
+
+        except grpc.RpcError as e:
+            # client disconnected / channel closed while streaming -> handle gracefully
+            self.logger.info(f"gRPC client stream closed while receiving observations: {e}")
+            return services_pb2.Empty()
+        except Exception as e:
+            self.logger.exception(f"Error while receiving observations: {e}")
+            return services_pb2.Empty()
 
     def GetActions(self, request, context):  # noqa: N802
         """Returns actions to the robot client. Actions are sent as a single
@@ -221,7 +230,6 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         client_id = context.peer()
         self.logger.debug(f"Client {client_id} connected for action streaming")
 
-        # Generate action based on the most recent observation and its timestep
         try:
             getactions_starts = time.perf_counter()
             obs = self.observation_queue.get(timeout=self.config.obs_queue_timeout)
@@ -392,12 +400,13 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
             return actions
 
+        except grpc.RpcError as e:
+            self.logger.info(f"gRPC error while streaming actions to client {client_id}: {e}")
+            return services_pb2.Empty()
         except Empty:  # no observation added to queue in obs_queue_timeout
             return services_pb2.Empty()
-
         except Exception as e:
             self.logger.error(f"Error in StreamActions: {e}")
-
             return services_pb2.Empty()
 
     def _obs_sanity_checks(self, obs: TimedObservation, previous_obs: TimedObservation) -> bool:
