@@ -470,17 +470,6 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
 
     teleop_action_processor, robot_action_processor, robot_observation_processor = make_default_processors()
 
-    # obs_features = robot.observation_features.copy()  # keep the original ft
-    # obs_state = obs_features.pop("state", {})
-    # dataset_features = {
-    #     "action": robot.action_features,
-    #     "observation.state": obs_state,
-    #     **{
-    #         f"observation.images.{key}": value
-    #         for key, value in obs_features.items()
-    #     }
-    # }
-
     dataset_features = combine_feature_dicts(
         aggregate_pipeline_dataset_features(
             pipeline=teleop_action_processor,

@@ -1,9 +1,11 @@
+from functools import cached_property
 import logging
 import threading
 from typing import Any, Dict, Optional
+from lerobot.robots.isaac_piper.isaac_piper_utils import Isaac_Piper_Joints
 from lerobot.teleoperators.ros2.config_ros2 import Ros2TeleoperatorConfig
 from lerobot.utils.decorators import check_if_not_connected
-from ..teleoperator import Teleoperator
+from lerobot.teleoperators.teleoperator import Teleoperator
 
 try:
     import rclpy
@@ -64,7 +66,7 @@ class Ros2Teleoperator(Teleoperator):
     def _spin_loop(self):
         while rclpy.ok() and self._is_running:
             if self.node is not None:
-                rclpy.spin_once(self.node, timeout_sec=0.1)
+                rclpy.spin_once(self.node, timeout_sec=0.0667)  # ~15Hz
 
     def _callback(self, msg) -> None:
         """Convert incoming ROS msg into a simple action dict and store latest."""
@@ -124,11 +126,11 @@ class Ros2Teleoperator(Teleoperator):
                 self.node.destroy_subscription(self.sub)
                 self.sub = None
 
-            # 记录节点引用并置为空，防止 spin 线程再次访问
+            # set temporary node reference and nullify original to prevent access from spin thread
             temp_node = self.node
             self.node = None
 
-            # 销毁真正的节点对象
+            # destroy node outside of spin thread to avoid deadlock
             temp_node.destroy_node()
 
         except Exception as e:
@@ -148,18 +150,7 @@ class Ros2Teleoperator(Teleoperator):
     
     @property
     def action_features(self) -> dict:
-        if self.config.joint_names:
-            return {
-                "dtype": "float32",
-                "shape": (len(self.config.joint_names),),
-                "names": self.config.joint_names
-            }
-        else:
-            return {
-                "dtype": "float32",
-                "shape": (None,),  # variable length
-                "names": None
-            }
+        return {f"{name}": float for name in self._piper_joint_names}
     
     @property
     def feedback_features(self) -> dict:
@@ -176,4 +167,9 @@ class Ros2Teleoperator(Teleoperator):
         pass
 
     @check_if_not_connected
-    def send_feedback(self, feedback: dict[str, Any]) -> None: ...
+    def send_feedback(self, feedback: dict[str, Any]) -> None: 
+        raise NotImplementedError("Piper does not support feedback")
+
+    @cached_property
+    def _piper_joint_names(self) -> list[str]:
+        return [joint.name for joint in Isaac_Piper_Joints]

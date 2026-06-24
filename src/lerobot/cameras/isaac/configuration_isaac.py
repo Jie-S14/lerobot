@@ -17,12 +17,10 @@ class IsaacCameraConfig(CameraConfig):
     """
 
     prim_path: str
-    # name: str
     is_warmup: bool = True
     warmup_steps: int = 10
     is_depth: bool = False
     pixel_format: Literal["rgb8", "rgba8", "r32f"] = "rgb8"
-    ros_topic: str | None = None
 
     def __post_init__(self) -> None:
         # base CameraConfig may validate common fields

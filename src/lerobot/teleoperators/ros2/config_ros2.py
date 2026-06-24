@@ -11,5 +11,4 @@ class Ros2TeleoperatorConfig(TeleoperatorConfig):
     msg_type: str = "JointState"
     node_name: str = "lerobot_ros2_teleop"
     qos: int = 10
-    # If provided, use these joint names to build a name->value dict
-    joint_names: Optional[List[str]] = None
+    # Joint names are in the config Isaac_Piper_Joints

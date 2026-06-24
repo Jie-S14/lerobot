@@ -15,28 +15,22 @@ class IsaacCamera(Camera):
     """
     Camera wrapper for Omniverse Isaac Sim cameras.
 
-    - Accepts an optional `world` object (e.g. omni.isaac.core.World) so multiple cameras/robots can share it.
+    - Accepts a mandatory `world` object (e.g. omni.isaac.core.World) so multiple cameras/robots can share it.
     - Maintains a background read thread that updates latest_frame and latest_timestamp.
     - read()/async_read() return an HWC uint8 numpy array (RGB) or single-channel float32 for depth.
     - async_read_with_timestamp/read_with_timestamp return (frame, timestamp).
     - `_capture_frame_from_isaac()` must be implemented to actually pull a frame from your local Isaac 4.2 API.
     """
 
-    def __init__(self, config: IsaacCameraConfig, world: Optional[Any] = None):
+    def __init__(self, config: IsaacCameraConfig, world: Any = None):
         super().__init__(config)
         self.config: IsaacCameraConfig = config
 
-        # Shared world (optional). If provided, connect() will try to use it to locate prims/handles.
-        self.world: Optional[Any] = world
+        # Shared world (mandatory) to attach the class camera from Isaac Sim to the workstage.
+        self.world: Any = world
 
         self._connected = False
         self._camera_handle: Optional[Any] = None  # store Isaac camera handle/reader
-        self.thread: Optional[Thread] = None
-        self.stop_event: Optional[Event] = None
-        self.frame_lock: Lock = Lock()
-        self.latest_frame: Optional[np.ndarray] = None
-        self.latest_timestamp: Optional[float] = None
-        self.new_frame_event: Event = Event()
 
     def __str__(self) -> str:
         return f"IsaacCamera({self.config.prim_path})"
@@ -50,7 +44,7 @@ class IsaacCamera(Camera):
         self.world = world
 
     def find_cameras(self) -> list[dict[str, Any]]:
-        return []
+        raise NotImplementedError("Camera detection is not implemented for Isaac Sim cameras.")
 
     def connect(self) -> None:
         if self.is_connected:
@@ -69,15 +63,7 @@ class IsaacCamera(Camera):
             self.world.scene.add(self._camera_handle)
 
         except Exception as e:
-            # If a world is provided but Omniverse imports fail, we still try to proceed if the world
-            # provides a camera subscription mechanism (e.g., ROS bridge). Otherwise raise clear error.
-            if self.world is None and self.ros_topic is None:
-                raise RuntimeError(
-                    "Failed to import Omniverse/Isaac APIs. "
-                    "Connect must be executed inside Isaac Sim's Python environment or ensure Omni packages are on PYTHONPATH. "
-                    f"Original error: {e}"
-                ) from e
-            logger.info("Omniverse imports failed but world/ros_topic present; continuing and expecting external subscription.")
+            raise RuntimeError(f"Failed to create Isaac camera handle for {self.config.prim_path}: {e}")
 
         self._connected = True
 
@@ -99,7 +85,9 @@ class IsaacCamera(Camera):
 
         return frame
 
-    def async_read(self, timeout_ms: float = 100):  #  -> np.ndarray
+    def async_read(self, timeout_ms: float = 100):
+        # To read frames from Isaac Sim, we need to capture frames at the same thread as the simulation loop - world.step().
+        # This is because Isaac Sim's API is not thread-safe and may require synchronization with the simulation loop.
         return self.read()
 
     def get_last_frame(self) -> Tuple[Optional[np.ndarray], Optional[float]]:

@@ -1,3 +1,4 @@
+from functools import cached_property
 import json
 import logging
 from pathlib import Path
@@ -10,6 +11,7 @@ import numpy as np
 
 from lerobot.cameras.utils import make_cameras_from_configs
 from lerobot.processor import RobotAction, RobotObservation
+from lerobot.robots.isaac_piper.isaac_piper_utils import Isaac_Piper_Joints
 from lerobot.robots.robot import Robot
 from .config_isaac_piper import IsaacPiperConfig
 from lerobot.cameras.isaac.camera_isaac import IsaacCamera  # type: ignore
@@ -36,16 +38,9 @@ class IsaacPiper(Robot):
         self._robot = None
         self._object = None
         self._goal = None
-        # store provided/shared world
-        self.world: Optional[Any] = world
+
         # prepare camera wrappers but do not connect them yet
-        self.cameras = make_cameras_from_configs(config.cameras)
-        self.joint_names = config.joint_names or []
-        # If you want to publish commands instead of directly setting in Isaac,
-        # implement a publisher (e.g., ROS2) here.
-        self._ros2_publisher = None
-        self._sim_thread: Optional[threading.Thread] = None
-        self._sim_stop_event: Optional[threading.Event] = None
+        self._cameras = make_cameras_from_configs(config.cameras)
         
         with open(config.obj_pose_path, "r", encoding="utf-8") as f:
             self._obj_poses = json.load(f)["object"]
@@ -54,25 +49,22 @@ class IsaacPiper(Robot):
             self._goal_poses = json.load(f)["goal"]
 
 
-    @property
+    @cached_property
     def observation_features(self) -> dict:
-        # example: images and joint states
+        # HWC is the standard image array format
         cam_features = {
-            key: (value.height, value.width, 3) for key, value in self.cameras.items()
+            key: (value.height, value.width, 3) for key, value in self._cameras.items()
         }
 
-        return {**self.joints_features, **cam_features}
+        return {**self.action_features, **cam_features}
 
-    @property
+    @cached_property
+    def _piper_joint_names(self) -> list[str]:
+        return [joint.name for joint in Isaac_Piper_Joints]
+
+    @cached_property
     def action_features(self) -> dict:
-        return self.joints_features
-
-    @property
-    def joints_features(self) -> dict[str, type]:
-        joints_features = {
-            name: float for name in self.config.joint_names
-        }
-        return joints_features
+        return {f"{name}": float for name in self._piper_joint_names}
 
     @property
     def is_connected(self) -> bool:
@@ -85,12 +77,12 @@ class IsaacPiper(Robot):
         """
         # Lazy import to avoid hard dependency at import time
         try:
-            # 配置需要加载的扩展
+            # must-have extensions for Isaac Sim 4.2
             config = {
                 "headless": False,
                 "exts": [
-                    "omni.isaac.ros2_bridge",  # 必须显式包含这个
-                    "omni.isaac.core_nodes"  # 解决 IsaacReadSimulationTime 警告
+                    "omni.isaac.ros2_bridge",  # must-have
+                    "omni.isaac.core_nodes"  # resolve IsaacReadSimulationTime warning
                 ]
             }
             # First have to instantiate sim_app
@@ -125,18 +117,14 @@ class IsaacPiper(Robot):
             self.world.scene.add(self._object)
             self.world.scene.add(self._goal)
 
-            for key, cam in self.cameras.items():
+            for _, cam in self._cameras.items():
                 cam.attach_to_world(self.world)
                 cam.connect()
-            self.world.reset()      # Have to be after all initialization, otherwise no data
+            self.world.reset()      # Have to be after all　 initialization, otherwise no data
 
             logger.info("Connected to Isaac robot")
             
         except Exception:
-            # allow ROS-only mode
-            # if self.config and getattr(self.config, "use_ros2_action_interface", False):
-            #     pass
-            # else:
             raise RuntimeError("Omniverse Isaac imports failed. Make sure Isaac Sim 4.2 Python environment is active.")
 
         self._connected = True
@@ -150,26 +138,28 @@ class IsaacPiper(Robot):
         # No-op for simulation or implement if needed
         pass
 
+    @property
+    def cameras(self) -> dict[str, IsaacCamera]:
+        return self._cameras
+
     def get_observation(self) -> RobotObservation:
         if not self.is_connected:
             raise RuntimeError("IsaacSimRobot not connected")
 
         # joints
         joint_positions = self._robot.get_joint_positions()
-        obs = dict(zip(self.joint_names, joint_positions))
+        obs = dict(zip(self._piper_joint_names, joint_positions))
         # cameras
-        for name in self.cameras.keys():
+        for name in self._cameras.keys():
             try:
-                frame = self.cameras[name].read()
+                frame = self._cameras[name].read()
                 if frame is None or frame.shape[0] == 0:
                     logger.warning(f"frame {frame} is empty. Probably because no world.reset() after camera initialization.")
                 obs[name] = frame
-                # Optionally include timestamps for alignment downstream
-                # obs[f"images.{name}_ts"] = ts
+
             except Exception as e:
                 logger.warning(f"Failed to read camera {name}: {e}")
                 obs[name] = None
-                # obs[f"images.{name}_ts"] = None
         return obs
 
     def _move_object(self, object,  pos, ori) -> None:
@@ -199,30 +189,33 @@ class IsaacPiper(Robot):
                           self._goal_poses[f"{ep}"]["position"],
                           [0, 0, self._goal_poses[f"{ep}"]["orientation"]])
 
-        for cam in self.cameras.values():
+        for cam in self._cameras.values():
             cam.warmup()
 
     def send_action(self, action: RobotAction) -> RobotAction:
         # For inference
         from omni.isaac.core.utils.types import ArticulationAction
 
-        # joint_targets = np.array([0.1, -0.2, 0.3, -0.1, 0.3, 0.0, 0.04, 0.04])
         joint_targets = np.array(list(action.values()))
-        # joint_targets[-2:] *= 100   # old dataset post process
         arti_action = ArticulationAction(joint_positions=joint_targets)
-        # joint_indices = self._robot.dof_names
 
         self._robot.apply_action(arti_action)
 
         # logger.info(f"send_action: self._robot.get_joint_positions(): {self._robot.get_joint_positions()}")
         return action
+    
+    def _get_real_dof_names(self):
+        logger.info(f"The real Isaac Sim robot DOF names: {self._robot.dof_names}")
 
     @property
-    def joint_positions(self):
+    def _joint_positions(self):
         return self._robot.get_joint_positions()
 
     def configure(self) -> None:
-        # Any runtime config (control gains, camera settings etc.)
+        """
+        Apply any one-time or runtime configuration to the robot.
+        This may include setting motor parameters, control modes, or initial state.
+        """
         pass
 
 
@@ -234,6 +227,6 @@ class IsaacPiper(Robot):
             except Exception:
                 pass
         self.world.stop()
-        # self._app.close()
+        # self._app.close() # comment it to solve eval process robot client thread disconnect hang issue 
         # TODO: shutdown SimulationApp if created (self._app) and cleanup stage if owned
         self._connected = False

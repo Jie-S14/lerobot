@@ -18,14 +18,11 @@ class IsaacPiperConfig(RobotConfig):
     fps: int = 30
     # camera prims mapping name -> prim_path
     cameras: dict[str, CameraConfig] = field(default_factory=dict)
-    # joint names in the order your policy/dataset expects
-    joint_names: List[str] = field(default_factory=list)
-    # If using ROS2-based action interface set this to True
-    use_ros2_action_interface: bool = True
-    # ROS2 topic to listen for joint commands (if use_ros2_action_interface)
+    # joint names are in the config Isaac_Piper_Joints
+    # ROS2 topic to listen for joint commands
     ros2_command_topic: str = "/isaac_joint_commands"
 
-    # configs for recording random positions and orientations
+    # configs for recording/evaluation with random positions and orientations
     obj_pose_path: str = "/home/shenjie/ws/data_viz/data/obj_pos_ori_record_2cam_top_wst_goal_blu_2pose.json" # use Path(__file__).parent to read relative path
     goal_pose_path: str = "/home/shenjie/ws/data_viz/data/goal_pos_ori_record_2cam_top_wst_goal_blu_2pose.json"
 

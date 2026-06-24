@@ -25,7 +25,7 @@ class EvalAsyncConfig:
     client: RobotClientConfig = field(default_factory=RobotClientConfig)
     server: PolicyServerConfig = field(default_factory=PolicyServerConfig)
     n_episodes: Optional[int] = None
-    episode_time_s: float = 40.0
+    episode_time_s: float = 45.0
     seed: Optional[int] = None
     results_folder: str = field(default=".", metadata={"help": "Folder to save the inference results"})
 
@@ -264,9 +264,9 @@ def eval_robot_client(
         logging.info(f"Success count: {successes}/{total} ({100.0 * succ_ratio:.2f}%)")
 
         datetime_str = time.strftime("%Y%m%d%H%M%S")
-        m = re.search(r'checkpoints/(\d+)', cfg.results_folder)
-        checkpoint = m.group(1)[:3] if m else "00k"
-        result_filepath = f"{cfg.results_folder}/inference_results_{cfg.client.actions_per_chunk}_{cfg.client.chunk_size_threshold}_{checkpoint}_{100.0 * succ_ratio:.2f}%_{datetime_str}.json"
+        m = re.search(r'checkpoints/(\d+)', cfg.client.pretrained_name_or_path)
+        checkpoint = m.group(1)[1:3] if m else "00"
+        result_filepath = f"{cfg.results_folder}/inference_results_{cfg.client.actions_per_chunk}_{cfg.client.chunk_size_threshold}_{checkpoint}k_{100.0 * succ_ratio:.2f}%_{datetime_str}.json"
         json.dump(results, open(result_filepath, "w"), indent=4)
         print(f"Results saved at {result_filepath}")
 
