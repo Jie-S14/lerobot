@@ -8,14 +8,17 @@ from lerobot.utils.utils import get_euclidean_distance
 
 EP_CONF_PATH = Path(__file__).parent.parent / "robots/isaac_piper/config_episode_rule.json"
 
-def generate_holdout_pose(seed, episodes):
+def generate_holdout_pose(seed, episodes, is_record):
     with open(EP_CONF_PATH, "r", encoding="utf-8") as f:
         ep_conf = json.load(f)
 
     obj_poses = { "object": {} }
     goal_poses = { "goal": {} }
-    obj_file_path = f"/home/shenjie/Documents/obj_pose_{seed}_{episodes}_"
-    goal_file_path = f"/home/shenjie/Documents/goal_pose_{seed}_{episodes}_"
+    dir_path = Path("/home/shenjie/ws/data_viz/data")
+    record_eval = "record" if is_record else "eval"
+    dataset_name = "2cam_top_wst_goal_blu_1pos_init_pos2_15hz_50ep"
+    obj_file_path = dir_path / f"obj_posori_{record_eval}_{dataset_name}_{seed}_{episodes}_" # obj_pos_ori_record/eval_2cam_top_wst_goal_blu_circle_pos.json
+    goal_file_path = dir_path / f"goal_posori_{record_eval}_{dataset_name}_{seed}_{episodes}_"
 
     for ep in range(episodes):
 
@@ -28,13 +31,15 @@ def generate_holdout_pose(seed, episodes):
                                                     ep_conf["limits"]["object"]["radius"][1],
                                                     ep_conf["limits"]["origin"][0],
                                                     ep_conf["limits"]["origin"][1])
-            goal_pos_x, goal_pos_y = get_random_position(ep_conf["limits"]["goal"]["angle1"][0],
-                                                            ep_conf["limits"]["goal"]["angle1"][1],
-                                                            ep_conf["limits"]["goal"]["radius"][0],
-                                                            ep_conf["limits"]["goal"]["radius"][1],
-                                                            ep_conf["limits"]["origin"][0],
-                                                            ep_conf["limits"]["origin"][1])
-            
+            # goal_pos_x, goal_pos_y = get_random_position(ep_conf["limits"]["goal"]["angle1"][0],
+            #                                                 ep_conf["limits"]["goal"]["angle1"][1],
+            #                                                 ep_conf["limits"]["goal"]["radius"][0],
+            #                                                 ep_conf["limits"]["goal"]["radius"][1],
+            #                                                 ep_conf["limits"]["origin"][0],
+            #                                                 ep_conf["limits"]["origin"][1])
+            goal_pos_x = ep_conf["limits"]["goal_fixed"]["x"]
+            goal_pos_y = ep_conf["limits"]["goal_fixed"]["y"]
+
             distance = get_euclidean_distance(obj_pos_x, obj_pos_y,
                                           goal_pos_x, goal_pos_y)
             if distance < ep_conf["limits"]["min_distance"]:
@@ -47,8 +52,9 @@ def generate_holdout_pose(seed, episodes):
 
         obj_ori = get_random_orientation(ep_conf["limits"]["object"]["orientation"][0],
                                         ep_conf["limits"]["object"]["orientation"][1])
-        goal_ori = get_random_orientation(ep_conf["limits"]["goal"]["orientation"][0],
-                                          ep_conf["limits"]["goal"]["orientation"][1])
+        # goal_ori = get_random_orientation(ep_conf["limits"]["goal"]["orientation"][0],
+        #                                   ep_conf["limits"]["goal"]["orientation"][1])
+        goal_ori = ep_conf["limits"]["goal_fixed"]["orientation"]
 
         obj_poses["object"][f"{ep}"] = {
             "position": [obj_pos_x, obj_pos_y, ep_conf["limits"]["object"]["z_axis"]],
@@ -70,8 +76,9 @@ def generate_holdout_pose(seed, episodes):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate dataset/holdout poses for recording/evaluation.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
-    parser.add_argument("--episodes", type=int, default=50, help="Number of episodes")
+    parser.add_argument("--episodes", type=int, default=100, help="Number of episodes")
+    parser.add_argument("--record", type=bool, default=True, help="Whether the poses are for record or evaluate")
     args = parser.parse_args()
 
-    generate_holdout_pose(seed=args.seed, episodes=args.episodes)
+    generate_holdout_pose(seed=args.seed, episodes=args.episodes, is_record=args.record)
     print("Poses saved!")

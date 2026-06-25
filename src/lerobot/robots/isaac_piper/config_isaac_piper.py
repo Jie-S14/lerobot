@@ -23,8 +23,8 @@ class IsaacPiperConfig(RobotConfig):
     ros2_command_topic: str = "/isaac_joint_commands"
 
     # configs for recording/evaluation with random positions and orientations
-    obj_pose_path: str = "/home/shenjie/ws/data_viz/data/obj_pos_ori_record_2cam_top_wst_goal_blu_2pose.json" # use Path(__file__).parent to read relative path
-    goal_pose_path: str = "/home/shenjie/ws/data_viz/data/goal_pos_ori_record_2cam_top_wst_goal_blu_2pose.json"
+    obj_pose_path: str = "/home/shenjie/ws/data_viz/data/obj_posori_record_2cam_top_wst_goal_blu_1pos_15hz_100ep_42_100.json" # use Path(__file__).parent to read relative path
+    goal_pose_path: str = "/home/shenjie/ws/data_viz/data/goal_posori_record_2cam_top_wst_goal_blu_1pos_15hz_100ep_42_100.json"
 
     # Simulation management options (Robot can manage stepping if it created/owns the world)
     manage_simulation: bool = True      # if True, IsaacPiperRobot starts internal sim loop

@@ -222,12 +222,6 @@ def eval_robot_client(
         except Exception as e:
             logging.warning(f"Error stopping client, {e}")
 
-        # 2) Wait for client-side threads to finish (action receiver)
-        # try:
-        #     action_receiver_thread.join(timeout=2.0)
-        # except Exception as e:
-        #     logging.warning(f"Error joining action receiver thread, {e}")
-
         # 3) Now that client threads exited, close the gRPC channel (this avoids aborting in-flight RPCs)
         try:
             if hasattr(client, "close_channel"):
@@ -264,9 +258,17 @@ def eval_robot_client(
         logging.info(f"Success count: {successes}/{total} ({100.0 * succ_ratio:.2f}%)")
 
         datetime_str = time.strftime("%Y%m%d%H%M%S")
-        m = re.search(r'checkpoints/(\d+)', cfg.client.pretrained_name_or_path)
-        checkpoint = m.group(1)[1:3] if m else "00"
-        result_filepath = f"{cfg.results_folder}/inference_results_{cfg.client.actions_per_chunk}_{cfg.client.chunk_size_threshold}_{checkpoint}k_{100.0 * succ_ratio:.2f}%_{datetime_str}.json"
+        m = re.search(r'smolvla_result_(\d{8})/checkpoints/(\d+)', cfg.client.pretrained_name_or_path)
+
+        if m:
+            policy = m.group(1)        # 20260624
+            ck = m.group(2)  # 020000
+        else:
+            policy = "00000000"
+            ck = "000000"
+
+        checkpoint = ck[1:3] if ck else "00"
+        result_filepath = f"{cfg.results_folder}/eval_results_{policy}_{cfg.client.actions_per_chunk}_{cfg.client.chunk_size_threshold}_{checkpoint}k_{100.0 * succ_ratio:.2f}%_{datetime_str}.json"
         json.dump(results, open(result_filepath, "w"), indent=4)
         print(f"Results saved at {result_filepath}")
 

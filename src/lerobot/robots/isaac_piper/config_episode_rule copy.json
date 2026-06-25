@@ -3,9 +3,9 @@
     "origin": [0.0, 0.0],
     "min_distance": 0.15,
     "object": {
-      "radius": [0.20, 0.42],
+      "radius": [0.18, 0.45],
       "angle": [45.0, 135.0],
-      "orientation": [-30.0, 30.0],
+      "orientation": [-45.0, 45.0],
       "z_axis": 0.78806
     },
     "goal": {
@@ -14,12 +14,6 @@
       "angle2": [163.0, 165.0],
       "orientation": [85.0, 95.0],
       "z_axis": 0.77553
-    },
-    "goal_fixed":{
-      "x": 0.048,
-      "y": 0.258,
-      "z_axis": 0.77553,
-      "orientation": 95.0
     }
   }
 }
