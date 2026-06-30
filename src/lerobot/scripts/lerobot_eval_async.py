@@ -24,7 +24,8 @@ from lerobot.utils.visualization_utils import init_rerun, stop_rerun
 class EvalAsyncConfig:
     client: RobotClientConfig = field(default_factory=RobotClientConfig)
     server: PolicyServerConfig = field(default_factory=PolicyServerConfig)
-    n_episodes: Optional[int] = None
+    start_episode: int = 0;
+    end_episode: Optional[int] = None;
     episode_time_s: float = 45.0
     seed: Optional[int] = None
     results_folder: str = field(default=".", metadata={"help": "Folder to save the inference results"})
@@ -100,7 +101,7 @@ def eval_robot_client(
     except Exception:
         default_episodes = 1
 
-    total_episodes = int(cfg.n_episodes) if (cfg.n_episodes is not None) else int(default_episodes)
+    total_episodes = int(cfg.end_episode) if (cfg.end_episode is not None) else int(default_episodes)
     logging.info(f"Will run {total_episodes} episodes (default from jsons: {default_episodes})")
 
     # timing parameters (use client fps if available)
@@ -109,8 +110,8 @@ def eval_robot_client(
 
     results = []
     try:
-        for ep in range(total_episodes):
-            logging.info(f"=== Episode {ep + 1}/{total_episodes} ===")
+        for ep in range(int(cfg.start_episode), total_episodes):
+            logging.info(f"=== Episode {ep}/{total_episodes - 1} ===")
             # Reset environment via robot.reset_env; accept both (ep, seed) and (ep,)
             try:
                 robot.reset_env(ep=ep, seed=cfg.seed)
@@ -258,7 +259,7 @@ def eval_robot_client(
         logging.info(f"Success count: {successes}/{total} ({100.0 * succ_ratio:.2f}%)")
 
         datetime_str = time.strftime("%Y%m%d%H%M%S")
-        m = re.search(r'smolvla_result_(\d{8})/checkpoints/(\d+)', cfg.client.pretrained_name_or_path)
+        m = re.search(r'smolvla_result_(.+)/checkpoints/(\d+)', cfg.client.pretrained_name_or_path)
 
         if m:
             policy = m.group(1)        # 20260624
@@ -268,7 +269,7 @@ def eval_robot_client(
             ck = "000000"
 
         checkpoint = ck[1:3] if ck else "00"
-        result_filepath = f"{cfg.results_folder}/eval_results_{policy}_{cfg.client.actions_per_chunk}_{cfg.client.chunk_size_threshold}_{checkpoint}k_{100.0 * succ_ratio:.2f}%_{datetime_str}.json"
+        result_filepath = f"{cfg.results_folder}/eval_results_{policy}_{cfg.client.actions_per_chunk}_{cfg.client.chunk_size_threshold}_{checkpoint}k_{cfg.start_episode}-{total_episodes}ep_{100.0 * succ_ratio:.2f}%_{datetime_str}.json"
         json.dump(results, open(result_filepath, "w"), indent=4)
         print(f"Results saved at {result_filepath}")
 

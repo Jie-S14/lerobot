@@ -3,7 +3,7 @@
     "origin": [0.0, 0.0],
     "min_distance": 0.15,
     "object": {
-      "radius": [0.20, 0.42],
+      "radius": [0.20, 0.45],
       "angle": [45.0, 135.0],
       "orientation": [-30.0, 30.0],
       "z_axis": 0.78806
