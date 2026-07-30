@@ -80,6 +80,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
         self._predicted_timesteps_lock = threading.Lock()
         self._predicted_timesteps = set()
+        self._has_pulled_first_obs = False
 
         self.last_processed_obs = None
 
@@ -155,6 +156,17 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         start = time.perf_counter()
         self.policy = policy_class.from_pretrained(policy_specs.pretrained_name_or_path)
         self.policy.to(self.device)
+
+        # print policy structure
+        for name, module in self.policy.named_modules():
+            print(name, type(module))
+
+        from torchinfo import summary
+        summary(self.policy)
+
+        for name, p in self.policy.named_parameters():
+            if p.requires_grad:
+                print(name)
 
         # Load preprocessor and postprocessor, overriding device to match requested device
         device_override = {"device": self.device}
@@ -241,6 +253,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
             with self._predicted_timesteps_lock:
                 self._predicted_timesteps.add(obs.get_timestep())
+                self._has_pulled_first_obs = True
 
             start_time = time.perf_counter()
             action_chunk = self._predict_action_chunk(obs)
@@ -384,7 +397,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
             self.logger.info(
                 f"Action chunk #{obs.get_timestep()} generated | "
-                f"Total time: {(inference_time + serialize_time) * 1000:.2f}ms"
+                f"Inference time: {inference_time * 1000:.2f}ms, total time: {(inference_time + serialize_time) * 1000:.2f}ms"
             )
 
             self.logger.debug(
@@ -433,7 +446,8 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
         if (
             obs.must_go
-            or self.last_processed_obs is None
+            # or self.last_processed_obs is None
+            or self._has_pulled_first_obs is False
             or self._obs_sanity_checks(obs, self.last_processed_obs)
         ):
             last_obs = self.last_processed_obs.get_timestep() if self.last_processed_obs else "None"
@@ -500,7 +514,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         start_inference = time.perf_counter()
         action_tensor = self._get_action_chunk(observation)
         inference_time = time.perf_counter() - start_inference
-        self.logger.info(
+        self.logger.debug(
             f"Preprocessing and inference took {inference_time:.4f}s, action shape: {action_tensor.shape}"
         )
 
