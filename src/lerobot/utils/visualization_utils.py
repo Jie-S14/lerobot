@@ -64,7 +64,7 @@ def stop_rerun(timeout_s: float = 2.0) -> None:
 
     try:
         rr.disconnect()
-        rr.rerun_shutdown()
+        # rr.rerun_shutdown()
         # try to flush any pending data first
         # if hasattr(rr, "flush"):
         #     try:

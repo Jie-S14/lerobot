@@ -80,7 +80,6 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
         self._predicted_timesteps_lock = threading.Lock()
         self._predicted_timesteps = set()
-        self._has_pulled_first_obs = False
 
         self.last_processed_obs = None
 
@@ -200,7 +199,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
             timed_observation = pickle.loads(received_bytes)  # nosec
             deserialize_time = time.perf_counter() - start_deserialize
 
-            self.logger.debug(f"Received observation #{timed_observation.get_timestep()}")
+            self.logger.info(f"Received observation #{timed_observation.get_timestep()}")
 
             obs_timestep = timed_observation.get_timestep()
             obs_timestamp = timed_observation.get_timestamp()
@@ -253,7 +252,6 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
             with self._predicted_timesteps_lock:
                 self._predicted_timesteps.add(obs.get_timestep())
-                self._has_pulled_first_obs = True
 
             start_time = time.perf_counter()
             action_chunk = self._predict_action_chunk(obs)
@@ -428,11 +426,11 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
             predicted_timesteps = self._predicted_timesteps
 
         if obs.get_timestep() in predicted_timesteps:
-            self.logger.debug(f"Skipping observation #{obs.get_timestep()} - Timestep predicted already!")
+            self.logger.info(f"Skipping observation #{obs.get_timestep()} - Timestep predicted already!")
             return False
 
-        elif observations_similar(obs, previous_obs, lerobot_features=self.lerobot_features):
-            self.logger.debug(
+        elif observations_similar(obs, previous_obs, lerobot_features=self.lerobot_features, atol=torch.tensor(self.config.obs_similarity_atol, dtype=torch.float32)):
+            self.logger.info(
                 f"Skipping observation #{obs.get_timestep()} - Observation too similar to last obs predicted!"
             )
             return False
@@ -444,15 +442,20 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         """Enqueue an observation if it must go through processing, otherwise skip it.
         Observations not in queue are never run through the policy network"""
 
+        self.logger.debug(
+            f"[ENQUEUE CHECK] obs_ts={obs.get_timestep()} must_go={obs.must_go} "
+            f"last_processed_is_none={self.last_processed_obs is None} "
+            f"predicted_timesteps={self._predicted_timesteps}"
+        )
+
         if (
             obs.must_go
-            # or self.last_processed_obs is None
-            or self._has_pulled_first_obs is False
+            or self.last_processed_obs is None
             or self._obs_sanity_checks(obs, self.last_processed_obs)
         ):
             last_obs = self.last_processed_obs.get_timestep() if self.last_processed_obs else "None"
             self.logger.debug(
-                f"Enqueuing observation. Must go: {obs.must_go} | Last processed obs: {last_obs}"
+                f"[Enqueuing observation] timestep:{obs.timestep} | Must go: {obs.must_go} | Last processed obs: {last_obs}"
             )
 
             # If queue is full, get the old observation to make room

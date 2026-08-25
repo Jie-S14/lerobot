@@ -9,6 +9,7 @@ from typing import List, Optional
 
 import grpc
 
+from lerobot.async_inference.helpers import visualize_action_queue_size
 from lerobot.configs import parser
 from lerobot.async_inference.configs import PolicyServerConfig, RobotClientConfig
 from lerobot.async_inference.policy_server import PolicyServer
@@ -109,6 +110,7 @@ def eval_robot_client(
     max_steps = int(cfg.episode_time_s / env_dt) if cfg.episode_time_s > 0 else 100000
 
     results = []
+    trace = []
     try:
         for ep in range(int(cfg.start_episode), total_episodes):
             logging.info(f"=== Episode {ep}/{total_episodes - 1} ===")
@@ -122,6 +124,7 @@ def eval_robot_client(
 
             step = 0
             done = False
+            trace.append({"ep": ep, "steps": []})
 
             # Clear action queue at start
             with client.action_queue_lock:
@@ -159,24 +162,32 @@ def eval_robot_client(
                     logging.debug(f"world.step() warning: {e}")
 
                 # If there are queued actions, perform one
+                action = [0]
                 if client.actions_available():
                     try:
-                        client.control_loop_action(verbose=False)
+                        action = client.control_loop_action(verbose=False)
                     except Exception as e:
                         logging.warning(f"control_loop_action error: {e}")
 
                 # Send observation to server if client ready
+                joint_state = [0]
                 try:
                     if client._ready_to_send_observation():
                         # control_loop_observation will add 'task' to raw_observation
-                        _ = client.control_loop_observation(task=cfg.client.task, verbose=False)
+                        obs = client.control_loop_observation(task=cfg.client.task, verbose=False)
+                        joint_state = [v for k, v in obs.items() if k.startswith("joint")]
+                    else:
+                        joint_state = client.robot.get_obs_joints()
                 except Exception as e:
                     logging.warning(f"control_loop_observation error: {e}")
 
-
+                trace[ep]["steps"].append({"step": step, "action": action, "joint_state": joint_state})
                 step += 1
                 # maintain fps
                 dt = time.perf_counter() - loop_t0
+                logging.debug(f"Episode {ep} passing frames={step} dt={dt:.4f}s (target {env_dt:.4f}s, missing {max(0.0, env_dt - dt):.4f}s)")
+                if dt > env_dt:
+                    logging.warning(f"Episode {ep} step {step} took longer than target dt ({dt:.4f}s > {env_dt:.4f}s)")
                 time.sleep(max(0.0, env_dt - dt))
 
             if not keyboard_events.get("succ") and not keyboard_events.get("fail"):
@@ -199,31 +210,44 @@ def eval_robot_client(
     finally:
         logging.info("Shutting down client and server")
 
-        # 2) Wait for client-side threads to finish (action receiver)
+        # 0) Stop keyboard listener
         try:
-            action_receiver_thread.join(timeout=0.5)
-            logging.info("Shutting down action_receiver_thread")
+            if listener is not None:
+                listener.stop()
+                listener.join(timeout=5)
+                if listener.is_alive():
+                    logging.warning("keyboard listener cannot stop, known pynput/Xlib issue")
+                time.sleep(0.2)
+                logging.info("Shutting down keyboard listener")
         except Exception as e:
-            logging.warning(f"Error joining action receiver thread, {e}")
+            logging.warning(f"Error stopping keyboard listener: {e}")
 
-
-        # 1) signal client threads to stop (do not close channel yet)
+        # 1) Notify client to stop receiving actions (this will cause receive_actions to exit)
         try:
             if getattr(client, "shutdown_event", None) is not None:
                 client.shutdown_event.set()
-                logging.info("Shutting down client.shutdown_event.set()")
-            # call client.stop() to run its disconnect logic (note: stop() no longer closes channel)
-            try:
-                stop_rerun()
-                logging.info("Shutting down rerun")
-                client.stop()
-                logging.info("Shutting down robot and client")
-            except Exception as e:
-                logging.warning(f"Error while stopping client: {e}")
+            logging.info("Shutting down client.shutdown_event.set()")
         except Exception as e:
-            logging.warning(f"Error stopping client, {e}")
+            logging.warning(f"Error setting shutdown_event: {e}")
 
-        # 3) Now that client threads exited, close the gRPC channel (this avoids aborting in-flight RPCs)
+        # 2) Wait for client-side threads to finish (action receiver)
+        try:
+            action_receiver_thread.join(timeout=5)
+            if action_receiver_thread.is_alive():
+                logging.warning("action_receiver_thread 还没退出, channel关闭可能不安全")
+            else:
+                logging.info("Shutting down action_receiver_thread")
+        except Exception as e:
+            logging.warning(f"Error joining action receiver thread, {e}")
+
+        # 3) Client stop() will handle any remaining cleanup (disconnect robot, etc.)
+        try:
+            client.stop()
+            logging.info("Shutting down client.stop()")
+        except Exception as e:
+            logging.warning(f"Error stopping client: {e}")
+
+        # 4) Now that client threads exited, close the gRPC channel (this avoids aborting in-flight RPCs)
         try:
             if hasattr(client, "close_channel"):
                 client.close_channel()
@@ -240,7 +264,6 @@ def eval_robot_client(
 
         # 4) Stop gRPC server with a short grace period so in-flight streams can finish cleanly
         try:
-            stop_rerun()  # stop rerun before server to allow any pending logs to flush
             grpc_server.stop(2)  # give 2s grace for existing RPCs to complete
             logging.info("Shutting down grpc_server")
         except Exception as e:
@@ -252,6 +275,13 @@ def eval_robot_client(
             logging.info("Shutting down server_wait_thread")
         except Exception as e:
             logging.warning(f"Error joining server wait thread, {e}")
+
+        # 6) close rerun after the close of rr.log()
+        # try:
+        #     stop_rerun()
+        #     logging.info("Shutting down rerun")
+        # except Exception as e:
+        #     logging.warning(f"Error stopping rerun: {e}")
 
         successes = sum(1 for r in results if r.get("success"))
         total = len(results) or 1
@@ -273,7 +303,22 @@ def eval_robot_client(
         json.dump(results, open(result_filepath, "w"), indent=4)
         print(f"Results saved at {result_filepath}")
 
-    return results
+        trace_filepath = f"{cfg.results_folder}/eval_trace_{policy}_{cfg.client.actions_per_chunk}_{cfg.client.chunk_size_threshold}_{checkpoint}k_{cfg.start_episode}-{total_episodes}ep_{100.0 * succ_ratio:.2f}%_{datetime_str}.json"
+        json.dump(trace, open(trace_filepath, "w"), indent=4)
+        print(f"Trace saved at {trace_filepath}")
+
+        # 8) 最后再画队列图：所有资源都已经关闭/结果都已经落盘之后
+        if getattr(cfg.client, "debug_visualize_queue_size", False):
+            try:
+                from lerobot.async_inference.helpers import visualize_action_queue_size
+                if client.action_queue_size:
+                    visualize_action_queue_size(client.action_queue_size)
+                else:
+                    logging.warning("action_queue_size 为空，跳过绘图")
+            except Exception as e:
+                logging.warning(f"Error visualizing action queue size: {e}")
+
+    # return results
 
 def main():
     eval_robot_client()

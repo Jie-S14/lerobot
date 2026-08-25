@@ -59,6 +59,8 @@ from lerobot.robots import (  # noqa: F401
     omx_follower,
     so_follower,
     isaac_piper,
+    piper,
+    agxpiper,
 )
 from lerobot.transport import services_pb2, services_pb2_grpc
 from lerobot.transport.utils import grpc_channel_options, send_bytes_in_chunks
@@ -253,6 +255,7 @@ class RobotClient:
             internal_queue = self.action_queue.queue
 
         current_action_queue = {action.get_timestep(): action.get_action() for action in internal_queue}
+        logging.info(f"Current action queue: {current_action_queue.keys()}, Incoming actions: {len(incoming_actions)}")
 
         for new_action in incoming_actions:
             with self.latest_action_lock:
@@ -281,6 +284,7 @@ class RobotClient:
 
         with self.action_queue_lock:
             self.action_queue = future_action_queue
+        logging.info(f"Aggregated action queue: {self.action_queue.qsize()}")
 
     def receive_actions(self, verbose: bool = False):
         """Receive actions from the policy server"""
@@ -419,6 +423,7 @@ class RobotClient:
     def _ready_to_send_observation(self):
         """Flags when the client is ready to send an observation"""
         with self.action_queue_lock:
+            logging.info(f"Ratio: {self.action_queue.qsize() / self.action_chunk_size:.2f}")
             return self.action_queue.qsize() / self.action_chunk_size <= self._chunk_size_threshold
 
     def control_loop_observation(self, task: str, verbose: bool = False) -> RawObservation:
@@ -446,6 +451,8 @@ class RobotClient:
             with self.action_queue_lock:
                 observation.must_go = self.must_go.is_set() and self.action_queue.empty()
                 current_queue_size = self.action_queue.qsize()
+
+            logging.info(f"Sending observation: {observation.get_timestep()} | {observation.must_go} | Queue size: {current_queue_size}")
 
             _ = self.send_observation(observation)
 
