@@ -1,0 +1,25 @@
+{
+  "limits": {
+    "origin": [0.0, 0.0],
+    "min_distance": 0.15,
+    "object": {
+      "radius": [0.20, 0.4],
+      "angle": [45.0, 135.0],
+      "orientation": [-30.0, 30.0],
+      "z_axis": 0.78806
+    },
+    "goal": {
+      "radius": [0.27, 0.30],
+      "angle1": [15.0, 17.0],
+      "angle2": [163.0, 165.0],
+      "orientation": [85.0, 95.0],
+      "z_axis": 0.77553
+    },
+    "goal_fixed":{
+      "x": 0.048,
+      "y": 0.258,
+      "z_axis": 0.77553,
+      "orientation": 95.0
+    }
+  }
+}

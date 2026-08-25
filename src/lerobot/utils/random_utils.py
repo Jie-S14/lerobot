@@ -189,6 +189,11 @@ def get_random_position(angle_min, angle_max, radius_min, radius_max, x0: float 
     # Output
     return x, y
 
+def get_random_position_square(x_min, x_max, y_min, y_max):
+    x = random.uniform(x_min, x_max)
+    y = random.uniform(y_min, y_max)
+    return x, y
+
 def get_random_orientation(angle_min, angle_max):
     ori = random.uniform(angle_min, angle_max)
     return ori
