@@ -109,7 +109,7 @@ class Ros2Teleoperator(Teleoperator):
         with self.lock:
             if self.latest is None:
                 # Return empty dict so downstream processors can handle no-op
-                return {}
+                return {name: 0.0 for name in self.action_features.keys()}
             # return a shallow copy
             return dict(self.latest)
 
