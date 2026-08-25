@@ -8,5 +8,5 @@ class Isaac_Piper_Joints(IntEnum):
     joint4 = 3
     joint5 = 4
     joint6 = 5
-    joint7 = 6
-    joint8 = 7
+    gripper_joint1 = 6
+    gripper_joint2 = 7

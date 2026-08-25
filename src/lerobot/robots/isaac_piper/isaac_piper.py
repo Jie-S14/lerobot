@@ -1,3 +1,4 @@
+import csv
 from functools import cached_property
 import json
 import logging
@@ -38,15 +39,28 @@ class IsaacPiper(Robot):
         self._robot = None
         self._object = None
         self._goal = None
+        self._tasks = []
+        self._obj_poses = {}
+        self._goal_poses = {}
 
         # prepare camera wrappers but do not connect them yet
         self._cameras = make_cameras_from_configs(config.cameras)
         
         with open(config.obj_pose_path, "r", encoding="utf-8") as f:
-            self._obj_poses = json.load(f)["object"]
+            # self._obj_poses = json.load(f)["object"]
+            reader = csv.DictReader(f)
+            for row in reader:
+                self._tasks.append(row["instruction"])
+                match row["role"]:
+                    case "cube":
+                        self._obj_poses[str(row["episode_id"])] = {"position": [float(row["x"]), float(row["y"]), self.config.obj_zaxis_offset],
+                                                              "orientation": float(row["orientation_deg"])}
+                    case "box":
+                        self._goal_poses[str(row["episode_id"])] = {"position": [float(row["x"]), float(row["y"]), self.config.goal_zaxis_offset],
+                                                              "orientation": float(row["orientation_deg"])}
 
-        with open(config.goal_pose_path, "r", encoding="utf-8") as f:
-            self._goal_poses = json.load(f)["goal"]
+        # with open(config.goal_pose_path, "r", encoding="utf-8") as f:
+        #     self._goal_poses = json.load(f)["goal"]
 
 
     @cached_property
@@ -65,6 +79,10 @@ class IsaacPiper(Robot):
     @cached_property
     def action_features(self) -> dict:
         return {f"{name}": float for name in self._piper_joint_names}
+    
+    @cached_property
+    def tasks(self) -> list[str]:
+        return self._tasks
 
     @property
     def is_connected(self) -> bool:
@@ -118,7 +136,7 @@ class IsaacPiper(Robot):
             self.world.scene.add(self._goal)
 
             for _, cam in self._cameras.items():
-                cam.attach_to_world(self.world)
+                cam.attach_to_world(self.world)   # comment if use opencv cam
                 cam.connect()
             self.world.reset()      # Have to be after all　 initialization, otherwise no data
 

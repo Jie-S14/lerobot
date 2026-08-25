@@ -43,20 +43,30 @@ class SOLeader(Teleoperator):
         norm_mode_body = MotorNormMode.DEGREES if config.use_degrees else MotorNormMode.RANGE_M100_100
         self.bus = FeetechMotorsBus(
             port=self.config.port,
+            # motors={
+            #     "shoulder_pan": Motor(1, "sts3215", norm_mode_body),
+            #     "shoulder_lift": Motor(2, "sts3215", norm_mode_body),
+            #     "elbow_flex": Motor(3, "sts3215", norm_mode_body),
+            #     "elbow_roll": Motor(4, "sts3215", norm_mode_body),
+            #     "wrist_flex": Motor(5, "sts3215", norm_mode_body),
+            #     "wrist_roll": Motor(6, "sts3215", norm_mode_body),
+            #     "gripper": Motor(7, "sts3215", MotorNormMode.RANGE_0_100),
+            # },
             motors={
-                "shoulder_pan": Motor(1, "sts3215", norm_mode_body),
-                "shoulder_lift": Motor(2, "sts3215", norm_mode_body),
-                "elbow_flex": Motor(3, "sts3215", norm_mode_body),
-                "wrist_flex": Motor(4, "sts3215", norm_mode_body),
-                "wrist_roll": Motor(5, "sts3215", norm_mode_body),
-                "gripper": Motor(6, "sts3215", MotorNormMode.RANGE_0_100),
+                "joint1": Motor(1, "sts3215", norm_mode_body),
+                "joint2": Motor(2, "sts3215", norm_mode_body),
+                "joint3": Motor(3, "sts3215", norm_mode_body),
+                "joint4": Motor(4, "sts3215", norm_mode_body),
+                "joint5": Motor(5, "sts3215", norm_mode_body),
+                "joint6": Motor(6, "sts3215", norm_mode_body),
+                "joint7": Motor(7, "sts3215", MotorNormMode.RANGE_0_100),
             },
             calibration=self.calibration,
         )
 
     @property
     def action_features(self) -> dict[str, type]:
-        return {f"{motor}.pos": float for motor in self.bus.motors}
+        return {f"{motor}": float for motor in self.bus.motors}
 
     @property
     def feedback_features(self) -> dict[str, type]:
@@ -101,7 +111,7 @@ class SOLeader(Teleoperator):
         input(f"Move {self} to the middle of its range of motion and press ENTER....")
         homing_offsets = self.bus.set_half_turn_homings()
 
-        full_turn_motor = "wrist_roll"
+        full_turn_motor = "joint6" # "wrist_roll"
         unknown_range_motors = [motor for motor in self.bus.motors if motor != full_turn_motor]
         print(
             f"Move all joints except '{full_turn_motor}' sequentially through their "
@@ -141,10 +151,29 @@ class SOLeader(Teleoperator):
     def get_action(self) -> dict[str, float]:
         start = time.perf_counter()
         action = self.bus.sync_read("Present_Position")
-        action = {f"{motor}.pos": val for motor, val in action.items()}
+        action = {f"{motor}": val for motor, val in action.items()}
         dt_ms = (time.perf_counter() - start) * 1e3
         logger.debug(f"{self} read action: {dt_ms:.1f}ms")
-        return action
+
+        # deal with bias
+        act_rad = dict()
+        act_rad["joint1"] = -action["joint1"]
+        act_rad["joint2"] = action["joint2"] + 90
+        act_rad["joint3"] = action["joint3"] - 97
+        act_rad["joint4"] = -action["joint4"] / 54.7 * 90.0
+        act_rad["joint5"] = action["joint5"]
+        act_rad["joint6"] = -action["joint6"] * 2.0
+        # act_rad["joint7"] = (action["joint7"] - 1.25) / 1000.0
+        act_rad["gripper_joint1"] = (action["joint7"] - 1.25) / 1000.0
+
+        # convert to radian
+        for motor in self.bus.motors:
+            if motor != "joint7":
+                act_rad[motor] = act_rad[motor] / 180.0 * 3.1415926
+        # act_rad["joint8"] = -act_rad["joint7"]
+        act_rad["gripper_joint2"] = -act_rad["gripper_joint1"]
+
+        return act_rad
 
     def send_feedback(self, feedback: dict[str, float]) -> None:
         # TODO: Implement force feedback
