@@ -116,6 +116,8 @@ from lerobot.robots import (  # noqa: F401
     so_follower,
     unitree_g1 as unitree_g1_robot,
     isaac_piper,
+    piper,
+    agxpiper,
 )
 from lerobot.teleoperators import (  # noqa: F401
     Teleoperator,
@@ -363,7 +365,7 @@ def record_loop(
         # robot.send_action(joints)
         # logging.info(f"record_loop: before step: robot.joint_positions: {robot.joint_positions}")
 
-        robot.world.step(render=True)
+        # robot.world.step(render=True)
         # logging.info(f"record_loop: after step: robot.joint_positions: {robot.joint_positions}")
 
         # Get robot observation
@@ -425,6 +427,7 @@ def record_loop(
         # so action actually sent is saved in the dataset. action = postprocessor.process(action)
         # TODO(steven, pepijn, adil): we should use a pipeline step to clip the action, so the sent action is the action that we input to the robot.
         # _sent_action = robot.send_action(robot_action_to_send)
+        robot.send_action(robot_action_to_send)
 
         # Write to dataset
         if dataset is not None:
@@ -552,7 +555,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             )
 
         with VideoEncodingManager(dataset):
-            recorded_episodes = 0
+            recorded_episodes = 0 if not cfg.resume else dataset.num_episodes
 
             log_say("Reset the environment", cfg.play_sounds)
 
@@ -578,7 +581,8 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
                 logging.info(f"Waiting for [SPACE] to start recording episode {recorded_episodes}...")
                 while not events["start_recording"] and not events["stop_recording"]:
-                    robot.world.step(render=True)
+                    # robot.world.step(render=True)
+                    continue
 
                 log_say(f"Recording episode {recorded_episodes}", cfg.play_sounds)
                 try:

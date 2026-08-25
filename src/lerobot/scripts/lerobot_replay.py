@@ -65,6 +65,7 @@ from lerobot.robots import (  # noqa: F401
     so_follower,
     unitree_g1,
     isaac_piper,
+    piper,
 )
 from lerobot.utils.constants import ACTION
 from lerobot.utils.import_utils import register_third_party_plugins
@@ -110,8 +111,8 @@ def replay(cfg: ReplayConfig):
     actions = episode_frames.select_columns(ACTION)
 
     robot.connect()
-    for i in range(100):
-        robot.world.step(render=True)
+    # for i in range(100):
+    #     robot.world.step(render=True)
 
     try:
         log_say("Replaying episode", cfg.play_sounds, blocking=True)
@@ -128,7 +129,7 @@ def replay(cfg: ReplayConfig):
             processed_action = robot_action_processor((action, robot_obs))
 
             _ = robot.send_action(processed_action)
-            robot.world.step(render=True)
+            # robot.world.step(render=True)
 
             dt_s = time.perf_counter() - start_episode_t
             precise_sleep(max(1 / dataset.fps - dt_s, 0.0))
