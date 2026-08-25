@@ -272,26 +272,64 @@ class RemotePolicyConfig:
     rename_map: dict[str, str] = field(default_factory=dict)
 
 
-def _compare_observation_states(obs1_state: torch.Tensor, obs2_state: torch.Tensor, atol: float) -> bool:
-    """Check if two observation states are similar, under a tolerance threshold"""
-    return bool(torch.linalg.norm(obs1_state - obs2_state) < atol)
+# def _compare_observation_states(obs1_state: torch.Tensor, obs2_state: torch.Tensor, atol: float) -> bool:
+#     """Check if two observation states are similar, under a tolerance threshold"""
+#     return bool(torch.linalg.norm(obs1_state - obs2_state) < atol)
 
+
+# def observations_similar(
+#     obs1: TimedObservation, obs2: TimedObservation, lerobot_features: dict[str, dict], atol: float = 1
+# ) -> bool:
+#     """Check if two observations are similar, under a tolerance threshold. Measures distance between
+#     observations as the difference in joint-space between the two observations.
+
+#     NOTE(fracapuano): This is a very simple check, and it is enough for the current use case.
+#     An immediate next step is to use (fast) perceptual difference metrics comparing some camera views,
+#     to surpass this joint-space similarity check.
+#     """
+#     obs1_state = extract_state_from_raw_observation(
+#         make_lerobot_observation(obs1.get_observation(), lerobot_features)
+#     )
+#     obs2_state = extract_state_from_raw_observation(
+#         make_lerobot_observation(obs2.get_observation(), lerobot_features)
+#     )
+
+#     return _compare_observation_states(obs1_state, obs2_state, atol=atol)
+
+def _compare_observation_states(
+    obs1_state: torch.Tensor,
+    obs2_state: torch.Tensor,
+    atol: torch.Tensor | float,
+) -> bool:
+    """Check if two observation states are similar under a per-dimension tolerance.
+
+    atol can be:
+    - a scalar (broadcast to all dims, backward-compatible with the old behavior)
+    - a tensor of shape (state_dim,) or (1, state_dim), giving each dimension
+      (e.g. each joint) its own tolerance.
+
+    Returns True ("similar") only if EVERY dimension's abs diff is below its own tolerance.
+    """
+    if not torch.is_tensor(atol):
+        atol = torch.tensor(atol)
+
+    diff = torch.abs(obs1_state - obs2_state)
+    logging.info(f"Diff on obs: {diff}")
+    atol = atol.to(dtype=diff.dtype, device=diff.device)
+
+    return bool(torch.all(diff < atol))
 
 def observations_similar(
-    obs1: TimedObservation, obs2: TimedObservation, lerobot_features: dict[str, dict], atol: float = 1
+    obs1: TimedObservation,
+    obs2: TimedObservation,
+    lerobot_features: dict[str, dict],
+    atol: torch.Tensor | float = 1,
 ) -> bool:
-    """Check if two observations are similar, under a tolerance threshold. Measures distance between
-    observations as the difference in joint-space between the two observations.
-
-    NOTE(fracapuano): This is a very simple check, and it is enough for the current use case.
-    An immediate next step is to use (fast) perceptual difference metrics comparing some camera views,
-    to surpass this joint-space similarity check.
-    """
+    """Check if two observations are similar, under a per-dimension tolerance threshold."""
     obs1_state = extract_state_from_raw_observation(
         make_lerobot_observation(obs1.get_observation(), lerobot_features)
     )
     obs2_state = extract_state_from_raw_observation(
         make_lerobot_observation(obs2.get_observation(), lerobot_features)
     )
-
     return _compare_observation_states(obs1_state, obs2_state, atol=atol)
