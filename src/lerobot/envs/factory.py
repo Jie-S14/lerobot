@@ -193,6 +193,14 @@ def make_env(
             gym_kwargs=cfg.gym_kwargs,
             env_cls=env_cls,
         )
+    elif "isaac_piper" in cfg.type:
+        from lerobot.envs.isaacpiper import create_isaac_piper_envs
+        if cfg.task is None:
+            raise ValueError("IsaacPiperEnv requires a task to be specified")
+        return create_isaac_piper_envs(
+            task=cfg.task, n_envs=n_envs, gym_kwargs=cfg.gym_kwargs, env_cls=env_cls,
+            # episode_length=cfg.episode_length, control_mode=cfg.control_mode,
+        )
 
     if cfg.gym_id not in gym_registry:
         print(f"gym id '{cfg.gym_id}' not found, attempting to import '{cfg.package_name}'...")

@@ -454,3 +454,100 @@ class IsaaclabArenaEnv(HubEnvConfig):
     @property
     def gym_kwargs(self) -> dict:
         return {}
+
+
+@EnvConfig.register_subclass("isaac_piper")
+@dataclass
+class IsaacPiperEnv(EnvConfig):
+    task: str = "pick_place"
+    fps: int = 15                        # 必须和 info.json 一致
+    episode_length: int = 300
+    obs_type: str = "pixels_agent_pos"
+    observation_height: int = 480        # 和 info.json 一致
+    observation_width: int = 640
+    camera_name: str = "top,wrist"       # 逗号分隔字符串,和 IsaacPiperConfig 的 cameras key 对应
+    sim_steps_per_action: int = 1
+    headless: bool = False
+
+    # --- 直接对应 IsaacPiperConfig 里必须显式传的字段 ---
+    stage_path: str = "/home/shenjie/usd/train/2cam_top_wst_goal_1pos_real_official.usd"
+    robot_prim_path: str = "/World/piper_official/base_link"
+    object_prim_path: str = "/World/red_block"
+    goal_prim_path: str = "/World/small_KLT"
+    obj_pose_path: str = "/home/shenjie/ws/generate_data/45_135_025_045/debug_check_success.csv"
+    goal_pose_path: str = ""
+    # 0.78524
+    obj_zaxis_offset: float = 0.78550
+    goal_zaxis_offset: float = 0.77553
+
+    # --- 相机 prim 路径,camera_name 里每个名字都要能在这里查到对应 prim ---
+    top_camera_prim_path: str = "/World/TopCamera"
+    wrist_camera_prim_path: str = "/World/piper_official/camera_link/WristCamera"
+
+    # 顺序严格对应 Isaac_Piper_Joints: joint1..6(单位: rad), gripper_joint1/2(单位: m)
+    joint_low: list = field(default_factory=lambda: [
+        -2.6179,  # joint1
+        0.0,  # joint2
+        -2.967,  # joint3
+        -1.745,  # joint4
+        -1.22,  # joint5
+        -2.09439,  # joint6
+        0.0,  # gripper_joint1 (m)
+        -0.35,  # gripper_joint2 (m)
+    ])
+    joint_high: list = field(default_factory=lambda: [
+        2.6179,  # joint1
+        3.14,  # joint2
+        0.0,  # joint3
+        1.745,  # joint4
+        1.22,  # joint5
+        2.09439,  # joint6
+        0.35,  # gripper_joint1 (m)
+        0.0,  # gripper_joint2 (m)
+    ])
+
+    features: dict = field(default_factory=dict)
+    features_map: dict = field(default_factory=dict)
+
+    def __post_init__(self):
+        cams = self.camera_name.split(",")
+        self.features["action"] = PolicyFeature(type=FeatureType.ACTION, shape=(8,))
+        self.features["agent_pos"] = PolicyFeature(type=FeatureType.STATE, shape=(8,))
+        for cam in cams:
+            self.features[f"pixels/{cam}"] = PolicyFeature(
+                type=FeatureType.VISUAL,
+                shape=(self.observation_height, self.observation_width, 3),
+            )
+        self.features_map = {
+            "action": ACTION,
+            "agent_pos": OBS_STATE,
+            **{f"pixels/{cam}": f"{OBS_IMAGES}.{cam}" for cam in cams},
+        }
+
+    @property
+    def gym_kwargs(self) -> dict:
+        # 这里把 EnvConfig 上所有字段"摊平"传给 gym.Env,
+        # 不再传 render_mode(不存在了),也不再传 control_mode(Piper是绝对关节控制,不适用)
+        return {
+            "task": self.task,
+            "camera_name": tuple(self.camera_name.split(",")),
+            "obs_type": self.obs_type,
+            "observation_height": self.observation_height,
+            "observation_width": self.observation_width,
+            "episode_length": self.episode_length,
+            "fps": self.fps,
+            "sim_steps_per_action": self.sim_steps_per_action,
+            "headless": self.headless,
+            "stage_path": self.stage_path,
+            "robot_prim_path": self.robot_prim_path,
+            "object_prim_path": self.object_prim_path,
+            "goal_prim_path": self.goal_prim_path,
+            "obj_pose_path": self.obj_pose_path,
+            "goal_pose_path": self.goal_pose_path,
+            "obj_zaxis_offset": self.obj_zaxis_offset,
+            "goal_zaxis_offset": self.goal_zaxis_offset,
+            "top_camera_prim_path": self.top_camera_prim_path,
+            "wrist_camera_prim_path": self.wrist_camera_prim_path,
+            "joint_low": self.joint_low,
+            "joint_high": self.joint_high,
+        }

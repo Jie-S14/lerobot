@@ -97,7 +97,7 @@ class IsaacPiper(Robot):
         try:
             # must-have extensions for Isaac Sim 4.2
             config = {
-                "headless": False,
+                "headless": self.config.headless,
                 "exts": [
                     "omni.isaac.ros2_bridge",  # must-have
                     "omni.isaac.core_nodes"  # resolve IsaacReadSimulationTime warning
@@ -142,7 +142,8 @@ class IsaacPiper(Robot):
 
             logger.info("Connected to Isaac robot")
             
-        except Exception:
+        except Exception as e:
+            logger.error(f"Failed to connect to Isaac robot: {e}")
             raise RuntimeError("Omniverse Isaac imports failed. Make sure Isaac Sim 4.2 Python environment is active.")
 
         self._connected = True
