@@ -27,3 +27,6 @@ SUPPORTED_POLICIES = ["act", "smolvla", "diffusion", "tdmpc", "vqbet", "pi0", "p
 
 # TODO: Add all other robots
 SUPPORTED_ROBOTS = ["so100_follower", "so101_follower", "bi_so_follower", "omx_follower", "isaac_piper"]
+
+# pick place task results
+PICK_PLACE_RESULT = {"0": "succ", "1": "fail_pick", "2": "fail_place", "3": "fail_choose"}

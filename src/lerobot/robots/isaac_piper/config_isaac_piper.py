@@ -17,7 +17,7 @@ class IsaacPiperConfig(RobotConfig):
     # Isaac Sim fps
     fps: int = 30
     # Isaac Sim starting param
-    headless: bool = True
+    headless: bool = False
     # camera prims mapping name -> prim_path
     cameras: dict[str, CameraConfig] = field(default_factory=dict)
     # joint names are in the config Isaac_Piper_Joints

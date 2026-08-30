@@ -6,10 +6,10 @@ import time
 from dataclasses import asdict, dataclass, field
 from pprint import pformat
 from typing import List, Optional
-
+import queue
 import grpc
 
-from lerobot.async_inference.helpers import visualize_action_queue_size
+from lerobot.async_inference.constants import PICK_PLACE_RESULT
 from lerobot.configs import parser
 from lerobot.async_inference.configs import PolicyServerConfig, RobotClientConfig
 from lerobot.async_inference.policy_server import PolicyServer
@@ -49,7 +49,8 @@ def eval_robot_client(
         set_seed(cfg.seed)
 
     # initialize eval keyboard listener (returns listener_obj, stop_event, events)
-    listener, stdin_stop_evt, keyboard_events = init_eval_keyboard_listener()
+    event_queue = queue.Queue()
+    listener = init_eval_keyboard_listener(event_queue)
 
     # Use server config from top-level cfg.server
     server_cfg = cfg.server
@@ -109,8 +110,9 @@ def eval_robot_client(
     env_dt = 1.0 / float(getattr(cfg.client, "fps", 30))
     max_steps = int(cfg.episode_time_s / env_dt) if cfg.episode_time_s > 0 else 100000
 
-    results = []
-    trace = []
+    results: dict[int, dict] = {}
+    trace: dict[int, dict] = {}
+    quit_requested = False
     try:
         for ep in range(int(cfg.start_episode), total_episodes):
             logging.info(f"=== Episode {ep}/{total_episodes - 1} ===")
@@ -124,7 +126,7 @@ def eval_robot_client(
 
             step = 0
             done = False
-            trace.append({"ep": ep, "steps": []})
+            trace[ep]["steps"] = []
 
             # Clear action queue at start
             with client.action_queue_lock:
@@ -137,16 +139,23 @@ def eval_robot_client(
             logging.info("Start episode loop (press Ctrl-C to abort whole eval)")
             # control loop: advance sim / consume actions / send observations
             while (not done) and (step < max_steps):
-                if keyboard_events.get("succ"):
-                    is_success = True
-                    logging.info(f"User marked episode {ep} SUCCESS at step {step}")
-                    results.append({"episode": ep, "steps": step, "success": is_success})
+                try:
+                    event = event_queue.get_nowait()
+                except queue.Empty:
+                    event = None
+
+                if event == "quit":
+                    quit_requested = True
                     break
-                if keyboard_events.get("fail"):
-                    is_success = False
-                    logging.info(f"User marked episode {ep} FAIL at step {step}")
-                    results.append({"episode": ep, "steps": step, "success": is_success})
-                    break
+                elif event in PICK_PLACE_RESULT.values():
+                    is_success = event == PICK_PLACE_RESULT["0"]
+
+                    logging.info(f"User marked episode {ep} {event.upper()} at step {step}")
+                    results[ep] = {
+                        "steps": step,
+                        "success": is_success,
+                        "fail_type": event,
+                    }
 
                 loop_t0 = time.perf_counter()
 
@@ -162,22 +171,22 @@ def eval_robot_client(
                     logging.debug(f"world.step() warning: {e}")
 
                 # If there are queued actions, perform one
-                action = [0]
+                action = [0] * len(robot.action_features)
                 if client.actions_available():
                     try:
-                        action = client.control_loop_action(verbose=False)
+                        action = list(client.control_loop_action(verbose=False).values())
                     except Exception as e:
                         logging.warning(f"control_loop_action error: {e}")
 
                 # Send observation to server if client ready
-                joint_state = [0]
+                joint_state = [0] * len(robot.action_features)
                 try:
                     if client._ready_to_send_observation():
                         # control_loop_observation will add 'task' to raw_observation
-                        obs = client.control_loop_observation(task=cfg.client.task, verbose=False)
-                        joint_state = [v for k, v in obs.items() if k.startswith("joint")]
+                        obs = client.control_loop_observation(task=robot.tasks[ep], verbose=False) # cfg.client.task
+                        joint_state = [v for k, v in obs.items() if "joint" in k]
                     else:
-                        joint_state = client.robot.get_obs_joints()
+                        joint_state = robot.joint_positions
                 except Exception as e:
                     logging.warning(f"control_loop_observation error: {e}")
 
@@ -190,22 +199,26 @@ def eval_robot_client(
                     logging.warning(f"Episode {ep} step {step} took longer than target dt ({dt:.4f}s > {env_dt:.4f}s)")
                 time.sleep(max(0.0, env_dt - dt))
 
-            if not keyboard_events.get("succ") and not keyboard_events.get("fail"):
-                is_success = False
+            if quit_requested:
+                break
+            if step == max_steps:
                 logging.info(f"Time out. Episode {ep} FAIL at step {step}")
-                results.append({"episode": ep, "steps": step, "success": is_success})
+                results[ep] = {
+                    "steps": step,
+                    "success": False,
+                    "fail_type": "timeout",
+                }
 
             # small pause before next episode
             log_say("Resetting environment for next episode", blocking=False)
-            keyboard_events["succ"] = False
-            keyboard_events["fail"] = False
             time.sleep(0.5)
 
-        keyboard_events.clear()
         logging.info("Eval complete")
 
-    except KeyboardInterrupt:
-        logging.info("Evaluation interrupted by user")
+    # except KeyboardInterrupt:
+    #     logging.info("Evaluation interrupted by user")
+    except Exception as e:
+        logging.warning(f"Error during evaluation: {e}")
 
     finally:
         logging.info("Shutting down client and server")

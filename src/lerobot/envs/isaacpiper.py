@@ -250,7 +250,7 @@ class IsaacPiperEnv(gym.Env):
         in_z_range = abs(z_diff) < self._success_diff_z_high
         logging.info(f"z_diff={z_diff}, success_diff_z_high={self._success_diff_z_high} in_z_range={in_z_range}")
 
-        joint_positions = self.robot._joint_positions
+        joint_positions = self.robot.joint_positions
         gripper_joint1 = abs(joint_positions[JOINT_NAMES.index("gripper_joint1")])
         gripper_joint2 = abs(joint_positions[JOINT_NAMES.index("gripper_joint2")])
         gripper_closed = (gripper_joint1 + gripper_joint2) < self._gripper_open_threshold

@@ -23,11 +23,13 @@ from contextlib import nullcontext
 from copy import copy
 from functools import cache
 from typing import Any
+import queue
 
 import numpy as np
 import torch
 from deepdiff import DeepDiff
 
+from lerobot.async_inference.constants import PICK_PLACE_RESULT
 from lerobot.datasets.lerobot_dataset import LeRobotDataset
 from lerobot.datasets.utils import DEFAULT_FEATURES
 from lerobot.policies.pretrained import PreTrainedPolicy
@@ -180,41 +182,37 @@ def init_keyboard_listener():
     return listener, events
 
 
-def init_eval_keyboard_listener():
+def init_eval_keyboard_listener(event_queue):
     """
     Init a small non-blocking keyboard listener tailored for eval:
-    - Keys: '1' -> mark success, '0' -> mark fail, 'q' -> quit.
+    - Keys: 'right' -> mark success, 'left' -> mark fail, 'esc' -> quit.
     - Prefer pynput keyboard listener (same behavior as record).
     Returns: (listener_obj, stop_event_or_None, events_dict)
     """
-    events = {"succ": False, "fail": False, "quit": False}
+    events = {r: False for r in PICK_PLACE_RESULT.values()}
+    events["quit"] = False
 
     # Try pynput first (graphical environments)
     from pynput import keyboard  # type: ignore
 
     def _on_press(key):
         try:
-            if key == keyboard.Key.right:
-                print("Right arrow key pressed. Marking episode as SUCCESS...")
-                events["succ"] = True
-                events
-            elif key == keyboard.Key.left:
-                print("Left arrow key pressed. Marking episode as FAIL...")
-                events["fail"] = True
-                events["succ"] = False  # ensure only one of succ/fail is True
-            elif key == keyboard.Key.esc:
+            if key == keyboard.Key.esc:
                 print("Escape key pressed. Quitting evaluation...")
-                events["quit"] = True
-                events["succ"] = False
-                events["fail"] = False
-
-        except Exception:
+                event_queue.put("quit")
+            elif key.char in PICK_PLACE_RESULT:
+                result = PICK_PLACE_RESULT[key.char]
+                print(f"Key {key.char} pressed. Marking episode as {result}...")
+                event_queue.put(result)
+            else:
+                print(f"Key {key.char} pressed. Unknown key.")
+        except AttributeError:
             # ignore non-printable keys or unexpected errors
             pass
 
     listener = keyboard.Listener(on_press=_on_press)
     listener.start()
-    return listener, None, events
+    return listener
 
 
 def sanity_check_dataset_name(repo_id, policy_cfg):

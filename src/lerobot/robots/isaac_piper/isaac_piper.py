@@ -227,7 +227,7 @@ class IsaacPiper(Robot):
         logger.info(f"The real Isaac Sim robot DOF names: {self._robot.dof_names}")
 
     @property
-    def _joint_positions(self):
+    def joint_positions(self):
         return self._robot.get_joint_positions()
 
     def configure(self) -> None:
