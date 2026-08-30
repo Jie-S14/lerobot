@@ -126,7 +126,7 @@ def eval_robot_client(
 
             step = 0
             done = False
-            trace[ep]["steps"] = []
+            trace[ep] = {"steps": []}
 
             # Clear action queue at start
             with client.action_queue_lock:
@@ -156,6 +156,7 @@ def eval_robot_client(
                         "success": is_success,
                         "fail_type": event,
                     }
+                    break
 
                 loop_t0 = time.perf_counter()
 
@@ -296,7 +297,7 @@ def eval_robot_client(
         # except Exception as e:
         #     logging.warning(f"Error stopping rerun: {e}")
 
-        successes = sum(1 for r in results if r.get("success"))
+        successes = sum(1 for r in results.values() if r.get("success"))
         total = len(results) or 1
         succ_ratio = successes / total
         logging.info(f"Success count: {successes}/{total} ({100.0 * succ_ratio:.2f}%)")

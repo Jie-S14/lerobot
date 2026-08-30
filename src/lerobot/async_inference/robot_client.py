@@ -423,7 +423,7 @@ class RobotClient:
     def _ready_to_send_observation(self):
         """Flags when the client is ready to send an observation"""
         with self.action_queue_lock:
-            logging.info(f"Ratio: {self.action_queue.qsize() / self.action_chunk_size:.2f}")
+            logging.debug(f"Ratio: {self.action_queue.qsize() / self.action_chunk_size:.2f}")
             return self.action_queue.qsize() / self.action_chunk_size <= self._chunk_size_threshold
 
     def control_loop_observation(self, task: str, verbose: bool = False) -> RawObservation:
