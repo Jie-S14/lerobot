@@ -476,8 +476,7 @@ class IsaacPiperEnv(EnvConfig):
     goal_prim_path: str = "/World/small_KLT"
     obj_pose_path: str = "/home/shenjie/ws/generate_data/45_135_025_045/debug_check_success.csv"
     goal_pose_path: str = ""
-    # 0.78524
-    obj_zaxis_offset: float = 0.78550
+    obj_zaxis_offset: float = 0.78524
     goal_zaxis_offset: float = 0.77553
 
     # --- 相机 prim 路径,camera_name 里每个名字都要能在这里查到对应 prim ---
