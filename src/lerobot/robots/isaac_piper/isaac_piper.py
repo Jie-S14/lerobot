@@ -166,7 +166,7 @@ class IsaacPiper(Robot):
             raise RuntimeError("IsaacSimRobot not connected")
 
         # joints
-        joint_positions = self._robot.get_joint_positions()
+        joint_positions = self._robot.get_joint_positions().tolist()   # convert ndarray with dtype=float32 to list[float]
         obs = dict(zip(self._piper_joint_names, joint_positions))
         # cameras
         for name in self._cameras.keys():
@@ -228,7 +228,7 @@ class IsaacPiper(Robot):
 
     @property
     def joint_positions(self):
-        return self._robot.get_joint_positions()
+        return self._robot.get_joint_positions().tolist()   # convert ndarray with dtype=float32 to list[float]
 
     def configure(self) -> None:
         """
