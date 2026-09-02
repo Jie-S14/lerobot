@@ -134,6 +134,13 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         self.last_raw_action_chunk_start_timestep = None
         self.logger.debug("[RTC] episode 边界重置：清空 last_raw_action_chunk")
 
+    def reset_episode_state(self) -> None:
+        """episode reset"""
+        with self._predicted_timesteps_lock:
+            self._predicted_timesteps = set()
+        self.last_processed_obs = None
+        self.logger.debug("[Episode Reset] Empty predicted_timesteps, last_processed_obs")
+
     def Ready(self, request, context):  # noqa: N802
         client_id = context.peer()
         self.logger.info(f"Client {client_id} connected and ready")

@@ -125,6 +125,7 @@ def eval_robot_client(
                 logging.warning(f"robot.reset_env failed: {e}")
             finally:
                 policy_server.reset_rtc_state()
+                policy_server.reset_episode_state() # episode context reset
                 client.reset_action_queue() # Clear action queue at start
 
             step = 0
