@@ -316,8 +316,10 @@ def _compare_observation_states(
     diff = torch.abs(obs1_state - obs2_state)
     logging.info(f"Diff on obs: {diff}")
     atol = atol.to(dtype=diff.dtype, device=diff.device)
+    result = bool(torch.all(diff < atol))
+    logging.info(f"Similarity result: {result}")
 
-    return bool(torch.all(diff < atol))
+    return result
 
 def observations_similar(
     obs1: TimedObservation,
@@ -326,6 +328,7 @@ def observations_similar(
     atol: torch.Tensor | float = 1,
 ) -> bool:
     """Check if two observations are similar, under a per-dimension tolerance threshold."""
+    logging.info(f"new obs step: {obs1.get_timestep()}, prev obs step: {obs2.get_timestep()}")
     obs1_state = extract_state_from_raw_observation(
         make_lerobot_observation(obs1.get_observation(), lerobot_features)
     )

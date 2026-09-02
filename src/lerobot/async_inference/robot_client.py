@@ -142,6 +142,12 @@ class RobotClient:
     def running(self):
         return not self.shutdown_event.is_set()
 
+    def reset_action_queue(self):
+        """Reset the action queue after shifting episodes."""
+        with self.action_queue_lock:
+            if not self.action_queue.empty():
+                self.action_queue = Queue()
+
     def start(self):
         """Start the robot client and connect to the policy server"""
         try:

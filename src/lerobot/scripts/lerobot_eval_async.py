@@ -123,18 +123,13 @@ def eval_robot_client(
                 robot.reset_env(ep=ep)
             except Exception as e:
                 logging.warning(f"robot.reset_env failed: {e}")
+            finally:
+                policy_server.reset_rtc_state()
+                client.reset_action_queue() # Clear action queue at start
 
             step = 0
             done = False
             trace[ep] = {"steps": []}
-
-            # Clear action queue at start
-            with client.action_queue_lock:
-                while not client.action_queue.empty():
-                    try:
-                        client.action_queue.get_nowait()
-                    except Exception:
-                        break
 
             logging.info("Start episode loop (press Ctrl-C to abort whole eval)")
             # control loop: advance sim / consume actions / send observations
@@ -175,7 +170,11 @@ def eval_robot_client(
                 action = [0] * len(robot.action_features)
                 if client.actions_available():
                     try:
-                        action = list(client.control_loop_action(verbose=False).values())
+                        raw_action = client.control_loop_action(verbose=False)
+                        if type(raw_action) is list:
+                            action = raw_action
+                        else:
+                            action = list(raw_action.values())
                     except Exception as e:
                         logging.warning(f"control_loop_action error: {e}")
 
@@ -184,7 +183,7 @@ def eval_robot_client(
                 try:
                     if client._ready_to_send_observation():
                         # control_loop_observation will add 'task' to raw_observation
-                        obs = client.control_loop_observation(task=robot.tasks[ep], verbose=False) # cfg.client.task
+                        obs = client.control_loop_observation(task=cfg.client.task, verbose=False) # robot.tasks[ep]
                         joint_state = [v for k, v in obs.items() if "joint" in k]
                     else:
                         joint_state = robot.joint_positions

@@ -83,6 +83,18 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
         self.last_processed_obs = None
 
+        # ---- RTC state ----
+        # 存的是"上一次预测的 chunk"，但是是 postprocess（反归一化）之前的
+        # 版本 —— 因为 RTC 的 denoise_step 是在模型内部的归一化空间里做
+        # guidance 计算的，不能直接用发给 client 的、已经反归一化的动作。
+        # 形状: (chunk_len, action_dim)，已经去掉了 batch 维。
+        self.last_raw_action_chunk: torch.Tensor | None = None
+        # 这个 chunk 对应的起始 timestep（也就是当时那次推理用的观测的
+        # timestep），用来在下一次推理时算 "consumed = 新观测timestep -
+        # 这个值"，consumed 同时就是 inference_delay，也用来定位
+        # leftover 该从 chunk 的第几步开始切。
+        self.last_raw_action_chunk_start_timestep: int | None = None
+
         # Attributes will be set by SendPolicyInstructions
         self.device = None
         self.policy_type = None
@@ -108,6 +120,19 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
         with self._predicted_timesteps_lock:
             self._predicted_timesteps = set()
+
+        # 新 client 连进来，RTC 的"历史 chunk"就作废了，必须清空，
+        # 不然会拿上一个 client/episode 的动作去 guide 这一个 episode。
+        self.last_raw_action_chunk = None
+        self.last_raw_action_chunk_start_timestep = None
+
+    def reset_rtc_state(self) -> None:
+        """Empty RTC memory，not the obs queue,
+        to prevent the RTC from using the memory of the previous episode.
+        """
+        self.last_raw_action_chunk = None
+        self.last_raw_action_chunk_start_timestep = None
+        self.logger.debug("[RTC] episode 边界重置：清空 last_raw_action_chunk")
 
     def Ready(self, request, context):  # noqa: N802
         client_id = context.peer()
@@ -252,6 +277,8 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
             with self._predicted_timesteps_lock:
                 self._predicted_timesteps.add(obs.get_timestep())
+
+            self.last_processed_obs = obs  # prevent twice #0 obs
 
             start_time = time.perf_counter()
             action_chunk = self._predict_action_chunk(obs)
@@ -442,6 +469,10 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         """Enqueue an observation if it must go through processing, otherwise skip it.
         Observations not in queue are never run through the policy network"""
 
+        with self._predicted_timesteps_lock:    # prevent twice #0 obs
+            if obs.get_timestep() in self._predicted_timesteps:
+                return False
+
         self.logger.debug(
             f"[ENQUEUE CHECK] obs_ts={obs.get_timestep()} must_go={obs.must_go} "
             f"last_processed_is_none={self.last_processed_obs is None} "
@@ -480,13 +511,73 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
             for i, action in enumerate(action_chunk)
         ]
 
-    def _get_action_chunk(self, observation: dict[str, torch.Tensor]) -> torch.Tensor:
+    def _rtc_enabled(self) -> bool:
+        """RTC 是否应该被使用，完全由 checkpoint 的 config.json 里的
+        rtc_config.enabled 决定 —— 这样切换 RTC on/off 做对照实验时，
+        只需要改 config.json，policy_server.py 的代码逻辑本身不用动。"""
+        rtc_config = getattr(self.policy.config, "rtc_config", None)
+        return rtc_config is not None and rtc_config.enabled
+
+    def _compute_rtc_kwargs(self, observation_t: TimedObservation) -> dict:
+        """根据"上一次预测的 chunk"和这次观测的 timestep，算出 RTC 需要的
+        三个参数。如果是第一次推理（没有历史 chunk），三个都返回 None，
+        RTC 内部逻辑本身就支持 prev_chunk_left_over=None（相当于不做
+        guidance），所以这里不需要特殊处理第一次的情况。
+        """
+        if not self._rtc_enabled() or self.last_raw_action_chunk is None:
+            return {"inference_delay": None, "prev_chunk_left_over": None, "execution_horizon": None}
+
+        current_timestep = observation_t.get_timestep()
+        # consumed = 距离上次推理，机器人已经执行了多少步。
+        # 同时这个数字就是 RTC 要的 inference_delay（单位：步）。
+        consumed = current_timestep - self.last_raw_action_chunk_start_timestep
+
+        if consumed <= 0:
+            # 理论上不应该出现（新观测的 timestep 不该比上次预测时还早），
+            # 出现说明上游 obs 乱序了，保守起见当作没有历史可用。
+            self.logger.warning(
+                f"[RTC] consumed={consumed} <= 0 (current_timestep={current_timestep}, "
+                f"last_chunk_start={self.last_raw_action_chunk_start_timestep}), 跳过 RTC guidance"
+            )
+            return {"inference_delay": None, "prev_chunk_left_over": None, "execution_horizon": None}
+
+        if consumed >= self.last_raw_action_chunk.shape[0]:
+            # 上一个 chunk 已经被完全消费完了，没有 leftover 可用
+            self.logger.debug(f"[RTC] 上一个 chunk 已消费完 (consumed={consumed}), 本次不做 RTC guidance")
+            return {"inference_delay": None, "prev_chunk_left_over": None, "execution_horizon": None}
+
+        prev_chunk_left_over = self.last_raw_action_chunk[consumed:, :]
+
+        self.logger.info(
+            f"[RTC] inference_delay={consumed} steps | "
+            f"prev_chunk_left_over shape={tuple(prev_chunk_left_over.shape)}"
+        )
+
+        return {
+            "inference_delay": consumed,
+            "prev_chunk_left_over": prev_chunk_left_over,
+            "execution_horizon": self.policy.config.rtc_config.execution_horizon,
+        }
+
+    def _get_action_chunk(
+        self, observation: dict[str, torch.Tensor], observation_t: TimedObservation
+    ) -> torch.Tensor:
         """Get an action chunk from the policy. The chunk contains only"""
-        chunk = self.policy.predict_action_chunk(observation)
+        rtc_kwargs = self._compute_rtc_kwargs(observation_t)
+        chunk = self.policy.predict_action_chunk(observation, **rtc_kwargs)
         if chunk.ndim != 3:
             chunk = chunk.unsqueeze(0)  # adding batch dimension, now shape is (B, chunk_size, action_dim)
 
-        return chunk[:, : self.actions_per_chunk, :]
+        chunk = chunk[:, : self.actions_per_chunk, :]
+
+        # 把这次预测的"原始"（归一化空间、postprocess 之前）chunk 存下来，
+        # 留给下一次推理算 RTC guidance 用。squeeze 掉 batch 维，因为
+        # server 一次只服务一个 client，不需要保留 batch 维。
+        if self._rtc_enabled():
+            self.last_raw_action_chunk = chunk.detach().clone().squeeze(0)
+            self.last_raw_action_chunk_start_timestep = observation_t.get_timestep()
+
+        return chunk
 
     def _predict_action_chunk(self, observation_t: TimedObservation) -> list[TimedAction]:
         """Predict an action chunk based on an observation.
@@ -515,7 +606,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
         """3. Get action chunk"""
         start_inference = time.perf_counter()
-        action_tensor = self._get_action_chunk(observation)
+        action_tensor = self._get_action_chunk(observation, observation_t)
         inference_time = time.perf_counter() - start_inference
         self.logger.debug(
             f"Preprocessing and inference took {inference_time:.4f}s, action shape: {action_tensor.shape}"
