@@ -73,6 +73,12 @@ class SmolVLAConfig(PreTrainedConfig):
     train_expert_only: bool = True
     train_state_proj: bool = True
 
+    # Probability of masking out the state token entirely during training (per-sample).
+    # Unlike zeroing the state vector, this removes the state token from attention
+    # (both as query and key) via pad_masks, so it is a true "missing observation"
+    # rather than an in-distribution all-zero state. 0.0 disables it (default behavior).
+    state_dropout_prob: float = 0.0
+
     # Training presets
     optimizer_lr: float = 1e-4
     optimizer_betas: tuple[float, float] = (0.9, 0.95)
@@ -122,6 +128,9 @@ class SmolVLAConfig(PreTrainedConfig):
             raise NotImplementedError(
                 "`use_delta_joint_actions_aloha` is used by smolvla for aloha real models. It is not ported yet in LeRobot."
             )
+
+        if not (0.0 <= self.state_dropout_prob <= 1.0):
+            raise ValueError(f"`state_dropout_prob` must be in [0.0, 1.0]. Got {self.state_dropout_prob}.")
 
     def validate_features(self) -> None:
         for i in range(self.empty_cameras):

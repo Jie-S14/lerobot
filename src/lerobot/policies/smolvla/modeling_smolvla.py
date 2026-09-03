@@ -52,6 +52,7 @@ policy = SmolVLAPolicy.from_pretrained("lerobot/smolvla_base")
 
 """
 
+import logging
 import math
 from collections import deque
 from typing import TypedDict
@@ -71,6 +72,7 @@ from lerobot.policies.utils import (
 from lerobot.utils.constants import ACTION, OBS_LANGUAGE_ATTENTION_MASK, OBS_LANGUAGE_TOKENS, OBS_STATE
 from lerobot.utils.utils import get_safe_dtype
 
+logger = logging.getLogger(__name__)
 
 class ActionSelectKwargs(TypedDict, total=False):
     inference_delay: int | None
@@ -697,6 +699,28 @@ class VLAFlowMatching(nn.Module):
 
         states_seq_len = state_emb.shape[1]
         state_mask = torch.ones(bsize, states_seq_len, dtype=torch.bool, device=device)
+
+        # State dropout (method 2): mask the state token out of attention entirely
+        # for a random subset of the batch, rather than zeroing its embedding value.
+        # This makes "no state" a true missing-observation signal instead of an
+        # in-distribution all-zero state vector. Only applied during training.
+
+        if self.training and self.config.state_dropout_prob > 0.0:
+            drop_sample = torch.rand(bsize, device=device) < self.config.state_dropout_prob
+            state_mask[drop_sample] = False
+
+            if logger.isEnabledFor(logging.DEBUG):
+                actual_ratio = drop_sample.float().mean().item()
+                logger.debug(
+                    "state_dropout: target_prob=%.3f actual_ratio=%.3f (%d/%d samples dropped), "
+                    "state_mask.sum(dim=1)=%s",
+                    self.config.state_dropout_prob,
+                    actual_ratio,
+                    int(drop_sample.sum().item()),
+                    bsize,
+                    state_mask.sum(dim=1).tolist(),
+                )
+
         pad_masks.append(state_mask)
 
         # Set attention masks so that image and language inputs do not attend to state or actions
