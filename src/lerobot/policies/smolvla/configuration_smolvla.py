@@ -79,6 +79,10 @@ class SmolVLAConfig(PreTrainedConfig):
     # rather than an in-distribution all-zero state. 0.0 disables it (default behavior).
     state_dropout_prob: float = 0.0
 
+    # Std (in normalized/MEAN_STD units, i.e. roughly fraction of one training-data std)
+    # of Gaussian noise added to the real (unpadded) state dims during training only.
+    state_noise_std: float = 0.0
+
     # Training presets
     optimizer_lr: float = 1e-4
     optimizer_betas: tuple[float, float] = (0.9, 0.95)

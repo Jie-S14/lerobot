@@ -474,6 +474,15 @@ class SmolVLAPolicy(PreTrainedPolicy):
     def prepare_state(self, batch):
         """Pad state"""
         state = batch[OBS_STATE][:, -1, :] if batch[OBS_STATE].ndim > 2 else batch[OBS_STATE]
+        
+        # State noise augmentation: add Gaussian noise to the *real* (unpadded) state
+        # dims during training only, to discourage the policy from over-relying on an
+        # exact absolute-state shortcut. Applied BEFORE pad_vector so the zero-padded
+        # dims (beyond the robot's true state_dim) stay exactly zero, as the model
+        # expects them to be.
+        if self.training and self.config.state_noise_std > 0.0:
+            state = state + torch.randn_like(state) * self.config.state_noise_std
+
         state = pad_vector(state, self.config.max_state_dim)
         return state
 
