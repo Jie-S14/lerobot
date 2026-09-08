@@ -3,6 +3,7 @@ import logging
 import re
 import threading
 import time
+from pathlib import Path
 from dataclasses import asdict, dataclass, field
 from pprint import pformat
 from typing import List, Optional
@@ -47,6 +48,10 @@ def eval_robot_client(
 
     if cfg.seed is not None:
         set_seed(cfg.seed)
+
+    # check if the output folder exists
+    if not Path(cfg.results_folder).exists():
+        raise FileNotFoundError(f"results_folder does not exist: {cfg.results_folder}")
 
     # initialize eval keyboard listener (returns listener_obj, stop_event, events)
     event_queue = queue.Queue()
