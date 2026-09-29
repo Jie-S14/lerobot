@@ -325,6 +325,9 @@ def eval_policy(
     # we dont want progress bar when we use slurm, since it clutters the logs
     progbar = trange(n_batches, desc="Stepping through eval batches", disable=inside_slurm())
     for batch_ix in progbar:
+        episode_ids = list(range(batch_ix * env.num_envs, (batch_ix + 1) * env.num_envs))
+        print(f"[eval] Starting batch {batch_ix}/{n_batches}, episode_ids={episode_ids}")
+
         # Cache frames for rendering videos. Each item will be (b, h, w, c), and the list indexes the rollout
         # step.
         if max_episodes_rendered > 0:

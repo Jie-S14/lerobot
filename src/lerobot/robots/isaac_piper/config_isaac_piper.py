@@ -12,7 +12,8 @@ class IsaacPiperConfig(RobotConfig):
     # Path to robot prim in USD (e.g. "/World/robot")
     robot_prim_path: str = "/World/piper/base_link"
     # Path to object to interact with (e.g. a block to push)
-    object_prim_path: str = "/World/red_block"
+    object_prim_path: str = "/World/object_block"
+    distractor_prim_path: str = "/World/distractor_block"
     goal_prim_path: str = "/World/small_KLT"
     # Isaac Sim fps
     fps: int = 30

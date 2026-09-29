@@ -37,7 +37,7 @@ class IsaacPiperEnv(gym.Env):
         fps: int = 15,
         sim_steps_per_action: int = 1,
         headless: bool = False,
-        stage_path: str = "/home/shenjie/usd/train/2cam_top_wst_goal_1pos_real_official.usd",
+        stage_path: str = "/home/shenjie/usd/inference/2cam_top_wst_goal_1pos_real_official.usd",
         robot_prim_path: str = "/World/piper_official/base_link",
         object_prim_path: str = "/World/red_block",
         goal_prim_path: str = "/World/small_KLT",
@@ -52,7 +52,7 @@ class IsaacPiperEnv(gym.Env):
         # success_xy_threshold: float = 0.05,  # 物体中心到goal中心的xy距离阈值(m),需按small_KLT实际内径标定
         # success_z_low: float = 0.012,  # 物体落入筐内后, z相对goal_z的最小偏移(m)
         success_diff_z_high: float = 0.02,  # 物体落入筐内后, z相对goal_z的最大偏移(m),需按筐深+方块尺寸标定
-        gripper_open_threshold: float = 0.1,  # 判定"夹爪已松开"的开口宽度阈值,量纲同gripper joint (0~0.7)
+        gripper_open_threshold: float = 0.01,  # 判定"夹爪已松开"的开口宽度阈值,量纲同gripper joint (0~0.07)
         success_hold_steps: int = 5,  # 条件需连续保持的步数,做去抖动
         cube_size: tuple[float, float, float] = _CUBE_SIZE,
         box_size: tuple[float, float, float] = _BOX_SIZE,
@@ -225,7 +225,8 @@ class IsaacPiperEnv(gym.Env):
           3. 夹爪需处于张开状态,排除"正抓着物体从筐上方掠过"的假阳性。
           4. 以上条件需连续保持 success_hold_steps 步(去抖动),排除单帧穿模/抖动导致的瞬时误判。
         """
-        obj_pos, _ = self.robot._object.get_world_pose()
+        # obj_pos, _ = self.robot._object.get_world_pose()
+        obj_pos, _ = self.robot._object_leaf.get_world_pose()
         goal_pos, goal_quat = self.robot._goal.get_world_pose()
         obj_pos = np.asarray(obj_pos, dtype=np.float64)
         goal_pos = np.asarray(goal_pos, dtype=np.float64)
@@ -253,7 +254,7 @@ class IsaacPiperEnv(gym.Env):
         joint_positions = self.robot.joint_positions
         gripper_joint1 = abs(joint_positions[JOINT_NAMES.index("gripper_joint1")])
         gripper_joint2 = abs(joint_positions[JOINT_NAMES.index("gripper_joint2")])
-        gripper_closed = (gripper_joint1 + gripper_joint2) < self._gripper_open_threshold
+        gripper_closed = gripper_joint1 < self._gripper_open_threshold and gripper_joint2 < self._gripper_open_threshold
         logging.info(f"gripper_joint1={gripper_joint1}, gripper_joint2={gripper_joint2}, gripper_closed={gripper_closed}")
 
         condition_met = in_xy_range and in_z_range and gripper_closed

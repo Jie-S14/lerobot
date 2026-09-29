@@ -474,6 +474,7 @@ class IsaacPiperEnv(EnvConfig):
     robot_prim_path: str = "/World/piper_official/base_link"
     object_prim_path: str = "/World/red_block"
     goal_prim_path: str = "/World/small_KLT"
+    distractor_prim_path: str = "/World/distractor_block"
     obj_pose_path: str = "/home/shenjie/ws/generate_data/45_135_025_045/debug_check_success.csv"
     goal_pose_path: str = ""
     obj_zaxis_offset: float = 0.78524
