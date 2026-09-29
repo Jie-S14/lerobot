@@ -94,6 +94,7 @@ class RobotClient:
         """
         # Store configuration
         self.config = config
+        self.sent_flag = False
         self.robot = make_robot_from_config(config.robot)
         # self.robot.connect()
 
@@ -261,7 +262,7 @@ class RobotClient:
             internal_queue = self.action_queue.queue
 
         current_action_queue = {action.get_timestep(): action.get_action() for action in internal_queue}
-        logging.info(f"Current action queue: {current_action_queue.keys()}, Incoming actions: {len(incoming_actions)}")
+        logging.debug(f"Current action queue: {current_action_queue.keys()}, Incoming actions: {len(incoming_actions)}")
 
         for new_action in incoming_actions:
             with self.latest_action_lock:
@@ -290,7 +291,7 @@ class RobotClient:
 
         with self.action_queue_lock:
             self.action_queue = future_action_queue
-        logging.info(f"Aggregated action queue: {self.action_queue.qsize()}")
+        logging.debug(f"Aggregated action queue: {self.action_queue.qsize()}")
 
     def receive_actions(self, verbose: bool = False):
         """Receive actions from the policy server"""
@@ -361,6 +362,7 @@ class RobotClient:
                 queue_update_time = time.perf_counter() - start_time
 
                 self.must_go.set()  # after receiving actions, next empty queue triggers must-go processing!
+                self.sent_flag = False
 
                 if verbose:
                     # Get queue state after changes
@@ -458,7 +460,7 @@ class RobotClient:
                 observation.must_go = self.must_go.is_set() and self.action_queue.empty()
                 current_queue_size = self.action_queue.qsize()
 
-            logging.info(f"Sending observation: {observation.get_timestep()} | {observation.must_go} | Queue size: {current_queue_size}")
+            logging.debug(f"Sending observation: {observation.get_timestep()} | {observation.must_go} | Queue size: {current_queue_size}")
 
             _ = self.send_observation(observation)
 
