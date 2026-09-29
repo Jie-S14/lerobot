@@ -871,11 +871,19 @@ class VLAFlowMatching(nn.Module):
                     # end token length (通常为1)
                     cur_idx += 1
 
+            # cur_idx 在上面的 image_layouts 循环结束后，正好停在 language block 的起始位置（因为 embed_prefix 里实际拼接顺序就是
+            # images -> language -> state，这里的重推导循环严格复现了 同样的顺序）。
+            # 显式存下来，下游（policy_server 等）就不需要再靠硬编码的 slice index 去猜 language token 在 prefix 里的位置了。
+            lang_start_idx = int(cur_idx)
+            lang_end_idx = int(cur_idx + num_lang_embs)
+
             prefix_layout = {
                 "batch_size": bsize,
                 "total_prefix_len": pad_masks.shape[1],
                 "image_layouts": image_layouts,
                 "num_lang_embs": num_lang_embs,
+                "lang_start_idx": lang_start_idx,
+                "lang_end_idx": lang_end_idx,
                 "states_seq_len": states_seq_len,
                 "prefix_length": self.prefix_length,
             }

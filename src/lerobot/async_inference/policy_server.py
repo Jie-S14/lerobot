@@ -44,6 +44,7 @@ from lerobot.processor import (
     PolicyAction,
     PolicyProcessorPipeline,
 )
+from lerobot.utils.constants import OBS_LANGUAGE_ATTENTION_MASK, OBS_LANGUAGE_TOKENS
 from lerobot.transport import services_pb2, services_pb2_grpc
 from lerobot.transport.utils import receive_bytes_in_chunks
 
@@ -84,15 +85,12 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         self.last_processed_obs = None
 
         # ---- RTC state ----
-        # 存的是"上一次预测的 chunk"，但是是 postprocess（反归一化）之前的
-        # 版本 —— 因为 RTC 的 denoise_step 是在模型内部的归一化空间里做
-        # guidance 计算的，不能直接用发给 client 的、已经反归一化的动作。
+        # 存的是"上一次预测的 chunk"，但是是 postprocess（反归一化）之前的版本
+        # 因为 RTC 的 denoise_step 是在模型内部的归一化空间里做guidance 计算的，不能直接用发给 client 的、已经反归一化的动作。
         # 形状: (chunk_len, action_dim)，已经去掉了 batch 维。
         self.last_raw_action_chunk: torch.Tensor | None = None
-        # 这个 chunk 对应的起始 timestep（也就是当时那次推理用的观测的
-        # timestep），用来在下一次推理时算 "consumed = 新观测timestep -
-        # 这个值"，consumed 同时就是 inference_delay，也用来定位
-        # leftover 该从 chunk 的第几步开始切。
+        # 这个 chunk 对应的起始 timestep（也就是当时那次推理用的观测的timestep），用来在下一次推理时算 "consumed = 新观测timestep - 这个值"，consumed 同时就是 inference_delay，
+        # 也用来定位 leftover 该从 chunk 的第几步开始切。
         self.last_raw_action_chunk_start_timestep: int | None = None
 
         # Attributes will be set by SendPolicyInstructions
@@ -103,6 +101,11 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         self.policy = None
         self.preprocessor: PolicyProcessorPipeline[dict[str, Any], dict[str, Any]] | None = None
         self.postprocessor: PolicyProcessorPipeline[PolicyAction, PolicyAction] | None = None
+
+        # ---- Language attention 诊断用缓存 ----
+        self.tokenizer = None
+        self.last_lang_token_ids: torch.Tensor | None = None
+        self.last_lang_attn_mask: torch.Tensor | None = None
 
     @property
     def running(self):
@@ -188,6 +191,18 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         self.policy = policy_class.from_pretrained(policy_specs.pretrained_name_or_path)
         self.policy.to(self.device)
 
+        # 缓存 tokenizer，供 attention 可视化时动态解码 language token 文本用
+        try:
+            self.tokenizer = self.policy.model.vlm_with_expert.processor.tokenizer
+            emb_layer = self.policy.model.vlm_with_expert.vlm.get_input_embeddings()
+            tok = self.policy.model.vlm_with_expert.processor.tokenizer
+            for word in ["red", "green", "blue", "yellow"]:
+                tid = tok.convert_tokens_to_ids(tok.tokenize(word)[0])
+                print(word, tid, emb_layer.weight[tid].norm().item())
+        except AttributeError:
+            self.logger.warning("[Lang Attn] 无法从 policy 中取到 tokenizer，language token 解码将不可用")
+            self.tokenizer = None
+
         # print policy structure
         for name, module in self.policy.named_modules():
             print(name, type(module))
@@ -196,8 +211,9 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         summary(self.policy)
 
         for name, p in self.policy.named_parameters():
-            if p.requires_grad:
-                print(name)
+            # if p.requires_grad:
+            #     print(name)
+            print(f"{p.requires_grad} {name}")
 
         # Load preprocessor and postprocessor, overriding device to match requested device
         device_override = {"device": self.device}
@@ -266,6 +282,25 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         except Exception as e:
             self.logger.exception(f"Error while receiving observations: {e}")
             return services_pb2.Empty()
+
+    _COLOR_VOCAB = {"red", "green", "blue", "yellow"}
+
+    def _decode_lang_tokens(
+            self, token_ids: torch.Tensor | None, attn_mask: torch.Tensor | None
+    ) -> list[str]:
+        if self.tokenizer is None or token_ids is None:
+            return []
+        ids = token_ids[0] if token_ids.ndim == 2 else token_ids
+        ids = ids.detach().cpu().tolist()
+        if attn_mask is not None:
+            mask = attn_mask[0] if attn_mask.ndim == 2 else attn_mask
+            mask = mask.detach().cpu().tolist()
+            ids = [i for i, m in zip(ids, mask) if m]
+        raw_tokens = self.tokenizer.convert_ids_to_tokens(ids)
+        return [(t.replace("\u0120", "").replace("\u2581", "") or t) for t in raw_tokens]
+
+    def _is_color_token(self, token_text: str) -> bool:
+        return token_text.strip().lower() in self._COLOR_VOCAB
 
     def GetActions(self, request, context):  # noqa: N802
         """Returns actions to the robot client. Actions are sent as a single
@@ -364,35 +399,77 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
                                         heatmap = arr.squeeze().cpu().numpy()
 
                                     attention_maps_per_image[f"image_{layout['image_index']}"] = heat_rgb
-                                # # For language instruction
-                                # lang_tokens = ["BOS", "Approach", "the", "red", "cube", ",", "pick", "it", "up", ",",
-                                #                "move", "it", "to", "the", "purple", "box", ",", "release", "it", ",",
-                                #                "return", "to", "the", "initial", "position", ".", "EOS"]
-                                # # --- Token strip (render text into an image) ---
-                                # H = 40
-                                # W = len(lang_tokens) * 40  # one cell per token
-                                # lang_img = np.ones((H, W, 3), dtype=np.uint8) * 255
-                                #
-                                # for i, tok in enumerate(lang_tokens):
-                                #     x = i * 40 + 5
-                                #     cv2.putText(
-                                #         lang_img,
-                                #         tok,
-                                #         (x, 25),
-                                #         cv2.FONT_HERSHEY_SIMPLEX,
-                                #         0.4,
-                                #         (0, 0, 0),
-                                #         1,
-                                #         cv2.LINE_AA,
-                                #     )
-                                # # Attention strip
-                                # lang_attn = key_attn[128: 155]
-                                # lang_attn = lang_attn / lang_attn.max()
-                                # lang_attn_heatmap = lang_attn.reshape(1, -1)
-                                # lang_attn_heatmap = np.repeat(lang_attn_heatmap, H, axis=0)
-                                # lang_attn_heatmap = np.repeat(lang_attn_heatmap, H, axis=1)
-                                # lang_attn_heatmap_img = (lang_attn_heatmap * 255).astype(np.uint8)
-                                # lang_attn_heatmap_img = cv2.applyColorMap(lang_attn_heatmap_img, cv2.COLORMAP_JET)
+                                # For language instruction —— 用 lang_start_idx/
+                                # lang_end_idx 动态定位，不再硬编码 slice
+                                lang_start = prefix_layout.get("lang_start_idx") if prefix_layout else None
+                                lang_end = prefix_layout.get("lang_end_idx") if prefix_layout else None
+                                if lang_start is None or lang_end is None:
+                                    self.logger.warning(
+                                        "[Lang Attn] prefix_layout 缺少 lang_start_idx/"
+                                        "lang_end_idx，回退到硬编码切片 [128:155]，结果可能不准"
+                                    )
+                                    lang_start, lang_end = 128, 155
+
+                                lang_tokens = self._decode_lang_tokens(
+                                    self.last_lang_token_ids, self.last_lang_attn_mask
+                                )
+                                if not lang_tokens:
+                                    lang_tokens = [f"tok{i}" for i in range(lang_end - lang_start)]
+
+                                lang_attn_raw = key_attn[lang_start:lang_end]
+                                n = min(len(lang_tokens), lang_attn_raw.shape[0])
+                                if n != len(lang_tokens) or n != lang_attn_raw.shape[0]:
+                                    self.logger.warning(
+                                        f"[Lang Attn] 解码出的 token 数({len(lang_tokens)}) 和 "
+                                        f"lang_start:lang_end 长度({lang_attn_raw.shape[0]}) 不一致，截断到 {n}"
+                                    )
+                                lang_tokens = lang_tokens[:n]
+                                lang_attn_raw = lang_attn_raw[:n]
+
+                                # --- Token strip (render text into an image) ---
+                                H = 40
+                                W = max(len(lang_tokens), 1) * 40
+                                lang_img = np.ones((H, W, 3), dtype=np.uint8) * 255
+                                for i, tok in enumerate(lang_tokens):
+                                    x = i * 40 + 5
+                                    cv2.putText(lang_img, tok, (x, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0, 0, 0), 1,
+                                                cv2.LINE_AA)
+
+                                lang_attn = lang_attn_raw / max(lang_attn_raw.max(), 1e-8)
+                                lang_attn_heatmap = lang_attn.reshape(1, -1)
+                                lang_attn_heatmap = np.repeat(lang_attn_heatmap, H, axis=0)
+                                lang_attn_heatmap = np.repeat(lang_attn_heatmap, H, axis=1)
+                                lang_attn_heatmap_img = (lang_attn_heatmap * 255).astype(np.uint8)
+                                lang_attn_heatmap_img = cv2.applyColorMap(lang_attn_heatmap_img, cv2.COLORMAP_JET)
+
+                                # ---- 诊断 1: top attention token + 颜色词各自的 attn 值 ----
+                                if lang_attn_raw.size > 0:
+                                    top_idx = int(np.argmax(lang_attn_raw))
+                                    top_token = lang_tokens[top_idx]
+                                    color_token_scores = {
+                                        tok: round(float(val), 4)
+                                        for tok, val in zip(lang_tokens, lang_attn_raw)
+                                        if self._is_color_token(tok)
+                                    }
+                                    self.logger.info(
+                                        f"[Lang Attn] top token='{top_token}' (idx={top_idx}, "
+                                        f"raw_attn={float(lang_attn_raw[top_idx]):.4f}) | "
+                                        f"color token raw_attn={color_token_scores or 'none found'}"
+                                    )
+
+                                # ---- 诊断 3: language block vs vision block 总注意力占比 ----
+                                vision_attn_total = 0.0
+                                if prefix_layout is not None:
+                                    for layout in prefix_layout.get("image_layouts", []):
+                                        vision_attn_total += float(
+                                            key_attn[layout["start_idx"]: layout["end_idx"]].sum())
+                                lang_attn_total = float(lang_attn_raw.sum())
+                                denom = vision_attn_total + lang_attn_total
+                                lang_share = lang_attn_total / denom if denom > 0 else float("nan")
+                                self.logger.info(
+                                    f"[Lang Attn] language block share of (vision+language) attention mass = {lang_share:.4f} "
+                                    f"(lang_sum={lang_attn_total:.4f}, vision_sum={vision_attn_total:.4f})"
+                                )
                             # rr.log("camera/top", rr.Image(obs.get_observation()["top"]))
                             # rr.log("camera/wrist", rr.Image(obs.get_observation()["wrist"]))
                             # rr.log("camera/attn_top", rr.Image(attention_maps_per_image["image_0"]))
@@ -406,7 +483,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
                             rr.log("camera/top_overlay", rr.Image(overlay_top))
                             rr.log("camera/wrist_overlay", rr.Image(overlay_wrist))
-                            # rr.log("lang/overlay", rr.Image(np.vstack([lang_attn_heatmap_img, lang_img])))
+                            rr.log("lang/overlay", rr.Image(np.vstack([lang_attn_heatmap_img, lang_img])))
                             # rr.log("lang/attn", rr.Tensor(lang_attn.reshape(1, -1)))
                             # rr.log("lang/tokens", rr.Image(lang_img))
                         except Exception as e:
@@ -460,11 +537,11 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
             predicted_timesteps = self._predicted_timesteps
 
         if obs.get_timestep() in predicted_timesteps:
-            self.logger.info(f"Skipping observation #{obs.get_timestep()} - Timestep predicted already!")
+            self.logger.debug(f"Skipping observation #{obs.get_timestep()} - Timestep predicted already!")
             return False
 
         elif observations_similar(obs, previous_obs, lerobot_features=self.lerobot_features, atol=torch.tensor(self.config.obs_similarity_atol, dtype=torch.float32)):
-            self.logger.info(
+            self.logger.debug(
                 f"Skipping observation #{obs.get_timestep()} - Observation too similar to last obs predicted!"
             )
             return False
@@ -609,6 +686,9 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
         start_preprocess = time.perf_counter()
         observation = self.preprocessor(observation)
         self.last_processed_obs: TimedObservation = observation_t
+        # 缓存这次推理实际用到的 language token ids / mask
+        self.last_lang_token_ids = observation.get(OBS_LANGUAGE_TOKENS)
+        self.last_lang_attn_mask = observation.get(OBS_LANGUAGE_ATTENTION_MASK)
         preprocessing_time = time.perf_counter() - start_preprocess
 
         """3. Get action chunk"""

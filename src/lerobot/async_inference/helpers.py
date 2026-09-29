@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 import torch
+from sympy import false
 
 from lerobot.configs.types import PolicyFeature
 from lerobot.datasets.utils import build_dataset_frame, hw_to_dataset_features
@@ -314,10 +315,10 @@ def _compare_observation_states(
         atol = torch.tensor(atol)
 
     diff = torch.abs(obs1_state - obs2_state)
-    logging.info(f"Diff on obs: {diff}")
+    logging.debug(f"Diff on obs: {diff}")
     atol = atol.to(dtype=diff.dtype, device=diff.device)
     result = bool(torch.all(diff < atol))
-    logging.info(f"Similarity result: {result}")
+    logging.debug(f"Similarity result: {result}")
 
     return result
 
@@ -328,7 +329,7 @@ def observations_similar(
     atol: torch.Tensor | float = 1,
 ) -> bool:
     """Check if two observations are similar, under a per-dimension tolerance threshold."""
-    logging.info(f"new obs step: {obs1.get_timestep()}, prev obs step: {obs2.get_timestep()}")
+    logging.debug(f"new obs step: {obs1.get_timestep()}, prev obs step: {obs2.get_timestep()}")
     obs1_state = extract_state_from_raw_observation(
         make_lerobot_observation(obs1.get_observation(), lerobot_features)
     )

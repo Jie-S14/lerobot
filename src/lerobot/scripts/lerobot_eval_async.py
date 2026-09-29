@@ -121,6 +121,7 @@ def eval_robot_client(
     try:
         for ep in range(int(cfg.start_episode), total_episodes):
             logging.info(f"=== Episode {ep}/{total_episodes - 1} ===")
+            logging.info(f"Task: {client.robot.tasks[ep]}")
             # Reset environment via robot.reset_env; accept both (ep, seed) and (ep,)
             try:
                 robot.reset_env(ep=ep, seed=cfg.seed)
@@ -189,7 +190,7 @@ def eval_robot_client(
                 try:
                     if client._ready_to_send_observation():
                         # control_loop_observation will add 'task' to raw_observation
-                        obs = client.control_loop_observation(task=cfg.client.task, verbose=False) # robot.tasks[ep]
+                        obs = client.control_loop_observation(task=client.robot.tasks[ep], verbose=False) # cfg.client.task
                         joint_state = [v for k, v in obs.items() if "joint" in k]
                     else:
                         joint_state = robot.joint_positions
