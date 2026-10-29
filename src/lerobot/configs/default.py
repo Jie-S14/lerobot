@@ -56,6 +56,7 @@ class EvalConfig:
     batch_size: int = 50
     # `use_async_envs` specifies whether to use asynchronous environments (multiprocessing).
     use_async_envs: bool = False
+    save_trace: bool = False
 
     def __post_init__(self) -> None:
         if self.batch_size > self.n_episodes:

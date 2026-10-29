@@ -101,6 +101,7 @@ def rollout(
     postprocessor: PolicyProcessorPipeline[PolicyAction, PolicyAction],
     seeds: list[int] | None = None,
     return_observations: bool = False,
+    return_trace: bool = False,          # 新增
     render_callback: Callable[[gym.vector.VectorEnv], None] | None = None,
 ) -> dict:
     """Run a batched policy rollout once through a batch of environments.
@@ -159,6 +160,7 @@ def rollout(
         leave=False,
     )
     check_env_attributes_and_types(env)
+    episode_traces = [{"steps": []} for _ in range(env.num_envs)] if return_trace else None
     while not np.all(done) and step < max_steps:
         # Numpy array to tensor and changing dictionary keys to LeRobot policy format.
         observation = preprocess_observation(observation)
@@ -187,6 +189,20 @@ def rollout(
 
         # Apply the next action.
         observation, reward, terminated, truncated, info = env.step(action_numpy)
+        if return_trace:
+            for i in range(env.num_envs):
+                joint_state = None
+                try:
+                    if isinstance(env, gym.vector.SyncVectorEnv):
+                        joint_state = np.asarray(
+                            env.envs[i].unwrapped.robot.joint_positions, dtype=np.float64).tolist()
+                    elif isinstance(env, gym.vector.AsyncVectorEnv):
+                        joint_state = env.call("get_joint_positions")[i]
+                except AttributeError:
+                    pass  # 非 IsaacPiper 的 env（如 LIBERO）没有 robot 属性，静默跳过
+                episode_traces[i]["steps"].append(
+                    {"step": step, "action": action_numpy[i].tolist(), "joint_state": joint_state}
+                )
         if render_callback is not None:
             render_callback(env)
 
@@ -241,6 +257,9 @@ def rollout(
             stacked_observations[key] = torch.stack([obs[key] for obs in all_observations], dim=1)
         ret[OBS_STR] = stacked_observations
 
+    if return_trace:
+        ret["trace"] = episode_traces
+
     if hasattr(policy, "use_original_modules"):
         policy.use_original_modules()
 
@@ -258,10 +277,12 @@ def eval_policy(
     max_episodes_rendered: int = 0,
     videos_dir: Path | None = None,
     return_episode_data: bool = False,
+    return_trace: bool = False,
     start_seed: int | None = None,
 ) -> dict:
     """
     Args:
+        return_trace:
         env: The batch of environments.
         policy: The policy.
         n_episodes: The number of episodes to evaluate.
@@ -303,6 +324,7 @@ def eval_policy(
     all_seeds = []
     threads = []  # for video saving threads
     n_episodes_rendered = 0  # for saving the correct number of videos
+    trace: dict[int, dict] = {}
 
     # Callback for visualization.
     def render_frame(env: gym.vector.VectorEnv):
@@ -349,6 +371,7 @@ def eval_policy(
             seeds=list(seeds) if seeds else None,
             return_observations=return_episode_data,
             render_callback=render_frame if max_episodes_rendered > 0 else None,
+            return_trace=return_trace,
         )
 
         # Figure out where in each rollout sequence the first done condition was encountered (results after
@@ -414,6 +437,12 @@ def eval_policy(
                 threads.append(thread)
                 n_episodes_rendered += 1
 
+        if return_trace:
+            for i, ep_trace in enumerate(rollout_data["trace"]):
+                g = batch_ix * env.num_envs + i
+                if g < n_episodes:
+                    trace[g] = ep_trace
+
         progbar.set_postfix(
             {"running_success_rate": f"{np.mean(all_successes[:n_episodes]).item() * 100:.1f}%"}
         )
@@ -456,6 +485,9 @@ def eval_policy(
 
     if max_episodes_rendered > 0:
         info["video_paths"] = video_paths
+
+    if return_trace:
+        info["trace"] = trace
 
     return info
 
@@ -564,6 +596,7 @@ def eval_main(cfg: EvalPipelineConfig):
             videos_dir=Path(cfg.output_dir) / "videos",
             start_seed=cfg.seed,
             max_parallel_tasks=cfg.env.max_parallel_tasks,
+            return_trace=cfg.eval.save_trace,
         )
         print("Overall Aggregated Metrics:")
         print(info["overall"])
@@ -571,12 +604,18 @@ def eval_main(cfg: EvalPipelineConfig):
         # Print per-suite stats
         for task_group, task_group_info in info.items():
             print(f"\nAggregated Metrics for {task_group}:")
-            print(task_group_info)
+            # print(task_group_info)
     # Close all vec envs
     close_envs(envs)
 
+    if cfg.eval.save_trace:
+        for task_info in info["per_task"]:
+            trace = task_info["metrics"].pop("trace", {})
+            fp = Path(cfg.output_dir) / f"eval_trace_id_seed1544.json"
+            json.dump(trace, open(fp, "w"), indent=4)
+
     # Save info
-    with open(Path(cfg.output_dir) / "eval_info.json", "w") as f:
+    with open(Path(cfg.output_dir) / "eval_info_0919_ood_outer_50action_seed1728.json", "w") as f:
         json.dump(info, f, indent=2)
 
     logging.info("End of eval")
@@ -588,6 +627,7 @@ class TaskMetrics(TypedDict):
     max_rewards: list[float]
     successes: list[bool]
     video_paths: list[str]
+    trace: dict[int, dict]
 
 
 ACC_KEYS = ("sum_rewards", "max_rewards", "successes", "video_paths")
@@ -606,6 +646,7 @@ def eval_one(
     videos_dir: Path | None,
     return_episode_data: bool,
     start_seed: int | None,
+    return_trace: bool,
 ) -> TaskMetrics:
     """Evaluates one task_id of one suite using the provided vec env."""
 
@@ -623,6 +664,7 @@ def eval_one(
         videos_dir=task_videos_dir,
         return_episode_data=return_episode_data,
         start_seed=start_seed,
+        return_trace=return_trace,
     )
 
     per_episode = task_result["per_episode"]
@@ -631,6 +673,7 @@ def eval_one(
         max_rewards=[ep["max_reward"] for ep in per_episode],
         successes=[ep["success"] for ep in per_episode],
         video_paths=task_result.get("video_paths", []),
+        trace=task_result.get("trace", {}),
     )
 
 
@@ -649,6 +692,7 @@ def run_one(
     videos_dir: Path | None,
     return_episode_data: bool,
     start_seed: int | None,
+    return_trace: bool = False,
 ):
     """
     Run eval_one for a single (task_group, task_id, env).
@@ -673,6 +717,7 @@ def run_one(
         videos_dir=task_videos_dir,
         return_episode_data=return_episode_data,
         start_seed=start_seed,
+        return_trace=return_trace,
     )
     # ensure we always provide video_paths key to simplify accumulation
     if max_episodes_rendered > 0:
@@ -694,6 +739,7 @@ def eval_policy_all(
     return_episode_data: bool = False,
     start_seed: int | None = None,
     max_parallel_tasks: int = 1,
+    return_trace: bool = False,
 ) -> dict:
     """
     Evaluate a nested `envs` dict: {task_group: {task_id: vec_env}}.
@@ -749,6 +795,7 @@ def eval_policy_all(
         videos_dir=videos_dir,
         return_episode_data=return_episode_data,
         start_seed=start_seed,
+        return_trace=return_trace,
     )
 
     if max_parallel_tasks <= 1:
