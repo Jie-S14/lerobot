@@ -66,6 +66,27 @@ import numpy as np
 import rerun as rr
 
 
+def grid_to_image_heat(grid: np.ndarray, out_hw: tuple[int, int], pad_wh) -> np.ndarray:
+    """把 VLM 图像 token 的 (h, w) attention 网格映射回【原始】相机图像 (H, W)。
+
+    SmolVLA 的 prepare_images 调用 resize_with_pad：先按比例缩放使长边等于 pad_wh，
+    再在图像【左侧和上方】补零到 pad_wh=(width, height)。因此 grid 覆盖的是补零后的整张画布，
+    不能直接拉伸到原图，否则热力图相对图像会偏移（例如 640x480 的图上方有 1/4 是黑边）。
+    步骤：放大到补零后的画布 -> 裁掉左/上的 padding -> 缩放到原图尺寸。
+    """
+    H, W = out_hw
+    t = torch.from_numpy(np.ascontiguousarray(grid, dtype=np.float32))[None, None]
+    if pad_wh is not None:
+        Wp, Hp = int(pad_wh[0]), int(pad_wh[1])
+        ratio = max(W / Wp, H / Hp)
+        resized_h, resized_w = int(H / ratio), int(W / ratio)
+        pad_h, pad_w = max(0, Hp - resized_h), max(0, Wp - resized_w)
+        t = F.interpolate(t, size=(Hp, Wp), mode="bilinear", align_corners=False)
+        t = t[..., pad_h:, pad_w:]
+    t = F.interpolate(t, size=(H, W), mode="bilinear", align_corners=False)
+    return t[0, 0].cpu().numpy()
+
+
 class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
     prefix = "policy_server"
     logger = get_logger(prefix)
@@ -315,8 +336,6 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
                 f"Running inference for observation #{obs.get_timestep()} (must_go: {obs.must_go})"
             )
 
-            # log_rerun_data(observation=obs.get_observation(), compress_images=True)
-
             with self._predicted_timesteps_lock:
                 self._predicted_timesteps.add(obs.get_timestep())
 
@@ -348,21 +367,11 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
 
                             obs_raw = obs.get_observation()
                             # 尝试从 observation 中读取原始图像尺寸（fallback 会使用 layout 中的 orig_hw 或 224x224）
-                            target_hw = None
+                            # 原始相机图像尺寸取自 obs（H, W）；下面的 (480, 640) 只在取不到时兜底
                             target_hw = (480, 640)
-                            # for img_key in (self.policy_image_features or []):
-                            #     if isinstance(obs_raw, dict) and img_key in obs_raw:
-                            #         img_data = obs_raw[img_key]
-                            #         try:
-                            #             # 支持 numpy / torch tensor / PIL-like ndarray
-                            #             if isinstance(img_data, torch.Tensor):
-                            #                 h, w = int(img_data.shape[-2]), int(img_data.shape[-1])
-                            #             else:
-                            #                 h, w = int(img_data.shape[-2]), int(img_data.shape[-1])
-                            #             target_hw = (h, w)
-                            #             break
-                            #         except Exception:
-                            #             target_hw = None
+                            cam_names = [k.split(".")[-1] for k in self.policy_image_features]  # image_index -> obs 里的相机名
+                            # SmolVLA 的 resize_with_pad 参数顺序是 (width, height)，补零在左侧和上方
+                            pad_wh = getattr(self.policy.config, "resize_imgs_with_padding", None)
 
                             attention_maps_per_image = {}
                             if prefix_layout is not None:
@@ -378,25 +387,19 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
                                         else:
                                             key_slice = np.pad(key_slice, (0, pad_or_trim - key_slice.size),
                                                                mode="constant")
-                                    # reshape -> (1,1,h,w) 方便 interpolate
-                                    arr = torch.from_numpy(key_slice.reshape(1, 1, h, w).astype("float32"))
-                                    # 如果没有目标像素尺寸，优先使用 layout.orig_hw，否则 224x224
-                                    tgt_h, tgt_w = None, None
-                                    if target_hw is not None:
-                                        tgt_h, tgt_w = target_hw
-                                    elif layout.get("orig_hw") is not None:
-                                        tgt_h, tgt_w = layout["orig_hw"]
-                                    else:
-                                        tgt_h, tgt_w = 224, 224
 
-                                    try:
-                                        up = F.interpolate(arr, size=(tgt_h, tgt_w), mode="bilinear",
-                                                           align_corners=False)
-                                        heatmap = up.squeeze().cpu().numpy()
-                                        heat_rgb = heatmap_to_rgb(heatmap, cmap="magma")
-                                        # blended = blend_heatmap_on_image(obs_img, heat_rgb, alpha=0.55)
-                                    except Exception:
-                                        heatmap = arr.squeeze().cpu().numpy()
+                                    grid = key_slice.reshape(h, w).astype("float32")
+                                    cam = cam_names[layout["image_index"]] if layout["image_index"] < len(
+                                        cam_names) else None
+                                    raw_img = obs_raw.get(cam) if isinstance(obs_raw, dict) else None
+                                    if raw_img is not None and getattr(raw_img, "ndim", 0) >= 2:
+                                        out_hw = (int(raw_img.shape[0]), int(raw_img.shape[1]))  # HWC
+
+                                    else:
+                                        out_hw = target_hw
+                                    # 先放大到补零后的画布、裁掉 padding，再缩放回原图（否则热力图会整体错位）
+                                    heatmap = grid_to_image_heat(grid, out_hw, pad_wh)
+                                    heat_rgb = heatmap_to_rgb(heatmap, cmap="magma")
 
                                     attention_maps_per_image[f"image_{layout['image_index']}"] = heat_rgb
                                 # For language instruction —— 用 lang_start_idx/
@@ -470,10 +473,7 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
                                     f"[Lang Attn] language block share of (vision+language) attention mass = {lang_share:.4f} "
                                     f"(lang_sum={lang_attn_total:.4f}, vision_sum={vision_attn_total:.4f})"
                                 )
-                            # rr.log("camera/top", rr.Image(obs.get_observation()["top"]))
-                            # rr.log("camera/wrist", rr.Image(obs.get_observation()["wrist"]))
-                            # rr.log("camera/attn_top", rr.Image(attention_maps_per_image["image_0"]))
-                            # rr.log("camera/attn_wrist", rr.Image(attention_maps_per_image["image_1"]))
+
                             overlay_top = cv2.addWeighted(obs.get_observation()["top"], 0.5,
                                                           attention_maps_per_image["image_0"], 0.5,
                                                           0)
@@ -484,12 +484,11 @@ class PolicyServer(services_pb2_grpc.AsyncInferenceServicer):
                             rr.log("camera/top_overlay", rr.Image(overlay_top))
                             rr.log("camera/wrist_overlay", rr.Image(overlay_wrist))
                             rr.log("lang/overlay", rr.Image(np.vstack([lang_attn_heatmap_img, lang_img])))
-                            # rr.log("lang/attn", rr.Tensor(lang_attn.reshape(1, -1)))
-                            # rr.log("lang/tokens", rr.Image(lang_img))
+
                         except Exception as e:
                             # fallback: 原有行为
                             self.logger.error(f"Failed to map attention to images: {e}")
-                            # log_rerun_data(observation=obs.get_observation(), compress_images=True)
+
                             rr.log("camera/top", rr.Image(obs.get_observation()["top"]))
                             rr.log("camera/wrist", rr.Image(obs.get_observation()["wrist"]))
                 else:
