@@ -201,6 +201,7 @@ class IsaacPiperEnv(gym.Env):
         observation = self._format_raw_obs(raw_obs)
 
         is_success = self._check_success()
+        # is_success = False    # for trace
         self._step_count += 1
         truncated = self._step_count >= self._max_episode_steps
         terminated = bool(is_success)
@@ -214,6 +215,10 @@ class IsaacPiperEnv(gym.Env):
             # self.reset()
 
         return observation, reward, terminated, truncated, info
+
+    def get_joint_positions(self):
+        """暴露给 eval 脚本记录 trace；兼容 AsyncVectorEnv 的 env.call()。"""
+        return np.asarray(self.robot.joint_positions, dtype=np.float64).tolist()
 
     def _check_success(self) -> bool:
         """
@@ -243,19 +248,19 @@ class IsaacPiperEnv(gym.Env):
         local_x = diff[0] * cos_y + diff[1] * sin_y
         local_y = -diff[0] * sin_y + diff[1] * cos_y
         in_xy_range = (abs(local_x) < self._xy_threshold_x) and (abs(local_y) < self._xy_threshold_y)
-        logging.info(f"local_x={local_x}, local_y={local_y}")
-        logging.info(f"_xy_threshold_x={self._xy_threshold_x}, _xy_threshold_y={self._xy_threshold_y}")
-        logging.info(f"in_xy_range={in_xy_range}")
+        logging.debug(f"local_x={local_x}, local_y={local_y}")
+        logging.debug(f"_xy_threshold_x={self._xy_threshold_x}, _xy_threshold_y={self._xy_threshold_y}")
+        logging.debug(f"in_xy_range={in_xy_range}")
 
         z_diff = obj_pos[2] - goal_pos[2]
         in_z_range = abs(z_diff) < self._success_diff_z_high
-        logging.info(f"z_diff={z_diff}, success_diff_z_high={self._success_diff_z_high} in_z_range={in_z_range}")
+        logging.debug(f"z_diff={z_diff}, success_diff_z_high={self._success_diff_z_high} in_z_range={in_z_range}")
 
         joint_positions = self.robot.joint_positions
         gripper_joint1 = abs(joint_positions[JOINT_NAMES.index("gripper_joint1")])
         gripper_joint2 = abs(joint_positions[JOINT_NAMES.index("gripper_joint2")])
         gripper_closed = gripper_joint1 < self._gripper_open_threshold and gripper_joint2 < self._gripper_open_threshold
-        logging.info(f"gripper_joint1={gripper_joint1}, gripper_joint2={gripper_joint2}, gripper_closed={gripper_closed}")
+        logging.debug(f"gripper_joint1={gripper_joint1}, gripper_joint2={gripper_joint2}, gripper_closed={gripper_closed}")
 
         condition_met = in_xy_range and in_z_range and gripper_closed
 

@@ -302,11 +302,11 @@ class IsaacPiper(Robot):
         _CUBE_SIZE = (0.05076477313041683, 0.050764773130416885, 0.05076477313041683)
         _BOX_SIZE = (0.1683948377237406, 0.15239914167349733, 0.029272011849160284)
 
-        gripper_open_threshold = 0.01,  # 判定"夹爪已松开"的开口宽度阈值,量纲同gripper joint (0~0.07)
+        gripper_open_threshold = 0.01  # 判定"夹爪已松开"的开口宽度阈值,量纲同gripper joint (0~0.07)
         cube_half = np.asarray(_CUBE_SIZE, dtype=np.float64) / 2.0
         box_half = np.asarray(_BOX_SIZE, dtype=np.float64) / 2.0
         success_diff_z_high = _BOX_SIZE[2]
-        xy_rotation_safe_margin = True,  # True: 用cube的xy对角线半长做安全边界(抗任意yaw旋转);False: 用cube半边长(更宽松但假设cube摆正)
+        xy_rotation_safe_margin = True  # True: 用cube的xy对角线半长做安全边界(抗任意yaw旋转);False: 用cube半边长(更宽松但假设cube摆正)
 
         if xy_rotation_safe_margin:
             # cube可能绕z任意旋转,取xy对角线半长做保守边界,保证任意朝向下cube都完全落在筐内才算成功
@@ -340,19 +340,19 @@ class IsaacPiper(Robot):
         local_x = diff[0] * cos_y + diff[1] * sin_y
         local_y = -diff[0] * sin_y + diff[1] * cos_y
         in_xy_range = (abs(local_x) < xy_threshold_x) and (abs(local_y) < xy_threshold_y)
-        logging.info(f"local_x={local_x}, local_y={local_y}")
-        logging.info(f"_xy_threshold_x={xy_threshold_x}, _xy_threshold_y={xy_threshold_y}")
-        logging.info(f"in_xy_range={in_xy_range}")
+        logging.debug(f"local_x={local_x}, local_y={local_y}")
+        logging.debug(f"_xy_threshold_x={xy_threshold_x}, _xy_threshold_y={xy_threshold_y}")
+        logging.debug(f"in_xy_range={in_xy_range}")
 
         z_diff = obj_pos[2] - goal_pos[2]
         in_z_range = abs(z_diff) < success_diff_z_high
-        logging.info(f"z_diff={z_diff}, success_diff_z_high={success_diff_z_high} in_z_range={in_z_range}")
+        logging.debug(f"z_diff={z_diff}, success_diff_z_high={success_diff_z_high} in_z_range={in_z_range}")
 
         joint_positions = self.joint_positions
         gripper_joint1 = abs(joint_positions[JOINT_NAMES.index("gripper_joint1")])
         gripper_joint2 = abs(joint_positions[JOINT_NAMES.index("gripper_joint2")])
         gripper_closed = gripper_joint1 < gripper_open_threshold and gripper_joint2 < gripper_open_threshold
-        logging.info(f"gripper_joint1={gripper_joint1}, gripper_joint2={gripper_joint2}, gripper_closed={gripper_closed}")
+        logging.debug(f"gripper_joint1={gripper_joint1}, gripper_joint2={gripper_joint2}, gripper_closed={gripper_closed}")
 
         condition_met = in_xy_range and in_z_range and gripper_closed
 

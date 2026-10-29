@@ -26,8 +26,8 @@ from lerobot.utils.visualization_utils import init_rerun, stop_rerun
 class EvalAsyncConfig:
     client: RobotClientConfig = field(default_factory=RobotClientConfig)
     server: PolicyServerConfig = field(default_factory=PolicyServerConfig)
-    start_episode: int = 0;
-    end_episode: Optional[int] = None;
+    start_episode: int = 0
+    end_episode: Optional[int] = None
     episode_time_s: float = 45.0
     seed: Optional[int] = None
     results_folder: str = field(default=".", metadata={"help": "Folder to save the inference results"})
@@ -119,6 +119,7 @@ def eval_robot_client(
     trace: dict[int, dict] = {}
     quit_requested = False
     try:
+        start_time = time.time()
         for ep in range(int(cfg.start_episode), total_episodes):
             logging.info(f"=== Episode {ep}/{total_episodes - 1} ===")
             logging.info(f"Task: {client.robot.tasks[ep]}")
@@ -230,6 +231,7 @@ def eval_robot_client(
             time.sleep(0.5)
 
         logging.info("Eval complete")
+        logging.info(f"Time elapsed: {time.time() - start_time:.4f}s")
 
     # except KeyboardInterrupt:
     #     logging.info("Evaluation interrupted by user")
