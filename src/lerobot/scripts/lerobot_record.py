@@ -350,7 +350,16 @@ def record_loop(
     if dataset is None:
         logging.info(f"Dataset is None. Now it is resetting the environment.")
         # pos, ori = get_random_pos_ori()
-        robot.reset_env(ep=recorded_episodes, seed=seed)   # 1. random obj pos
+        reset_flag = True
+        while reset_flag:
+            try:
+                robot.reset_env(ep=recorded_episodes, seed=seed)   # 1. random obj pos
+                reset_flag = False
+            except Exception as e:
+                logging.error(f"Error resetting the environment: {e}")
+                precise_sleep(2)
+                robot.world.step(render=True)
+
 
     timestamp = 0
     start_episode_t = time.perf_counter()
@@ -365,7 +374,7 @@ def record_loop(
         # robot.send_action(joints)
         # logging.info(f"record_loop: before step: robot.joint_positions: {robot.joint_positions}")
 
-        # robot.world.step(render=True)
+        robot.world.step(render=True)
         # logging.info(f"record_loop: after step: robot.joint_positions: {robot.joint_positions}")
 
         # Get robot observation
@@ -581,7 +590,7 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
             while recorded_episodes < cfg.dataset.num_episodes and not events["stop_recording"]:
                 logging.info(f"Waiting for [SPACE] to start recording episode {recorded_episodes}...")
                 while not events["start_recording"] and not events["stop_recording"]:
-                    # robot.world.step(render=True)
+                    robot.world.step(render=True)
                     continue
 
                 log_say(f"Recording episode {recorded_episodes}", cfg.play_sounds)
@@ -599,7 +608,8 @@ def record(cfg: RecordConfig) -> LeRobotDataset:
                         postprocessor=postprocessor,
                         dataset=dataset,
                         control_time_s=cfg.dataset.episode_time_s,
-                        single_task=cfg.dataset.single_task,
+                        # single_task=cfg.dataset.single_task,
+                        single_task=robot.tasks[recorded_episodes],
                         display_data=cfg.display_data,
                         display_compressed_images=display_compressed_images,
                     )
