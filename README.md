@@ -46,10 +46,15 @@ Blue boxes in the figure are the parts added or modified in this fork; white box
 
 ### Demo videos
 
-![Sim and real world](media/readme/sim_real.mp4)
+Recordings from the simulator Isaac Sim 4.2 and the real-world.
+
+<img src="./media/readme/sim_real.webp" alt="Simulation vs Real-world Demo">
+
 
 <!-- Example:
 https://github.com/user-attachments/assets/<id>
+width="320" height="240" 
+https://github.com/user-attachments/assets/eb061179-6bd3-485c-874b-aebf9b766efc
 -->
 
 ---
